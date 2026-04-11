@@ -75,7 +75,8 @@ func CreateEventFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		UpdatedAt time.Time `json:"updatedAt"`
 	}
 
-	if err := json.Unmarshal(raw, &parsed); err != nil {
+	err := json.Unmarshal(raw, &parsed)
+	if err != nil {
 		return fmt.Errorf("failed to parse event JSON: %w", err)
 	}
 
@@ -138,7 +139,8 @@ func QueryEvents(db *gorm.DB, q EventQuery) (*EventResult, error) {
 	}
 
 	var events []Event
-	if err := query.Order("created_at DESC, id DESC").Limit(q.Limit).Find(&events).Error; err != nil {
+	err := query.Order("created_at DESC, id DESC").Limit(q.Limit).Find(&events).Error
+	if err != nil {
 		return nil, err
 	}
 

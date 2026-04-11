@@ -20,11 +20,20 @@ func Connect() (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
 
-	if err := db.AutoMigrate(&models.Event{}, &models.EventCountry{}); err != nil {
+	err = db.AutoMigrate(
+		&models.Event{}, &models.EventCountry{},
+		&models.WorkOffer{},
+		&models.Article{},
+		&models.Transaction{}, &models.TransactionParticipant{},
+	)
+	if err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
 	models.AddEventIndexes(db)
+	models.AddWorkOfferIndexes(db)
+	models.AddArticleIndexes(db)
+	models.AddTransactionIndexes(db)
 
 	return db, nil
 }
