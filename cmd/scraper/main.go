@@ -55,17 +55,23 @@ func main() {
 }
 
 func scrapeAll(ctx context.Context, s *scraper.Scraper, db *gorm.DB) {
-	scrapePages(ctx, s, db, "event.getEventsPaginated", map[string]any{"limit": 100}, 0, models.UpsertEventFromJSON)
-	scrapePages(ctx, s, db, "workOffer.getWorkOffersPaginated", map[string]any{"limit": 100}, 0, models.UpsertWorkOfferFromJSON)
-	scrapePages(ctx, s, db, "transaction.getPaginatedTransactions", map[string]any{"limit": 100}, 0, models.UpsertTransactionFromJSON)
+	scrapePages(ctx, s, db, "event.getEventsPaginated", map[string]any{"limit": 100}, "events", 0, models.UpsertEventFromJSON)
+	scrapePages(ctx, s, db, "workOffer.getWorkOffersPaginated", map[string]any{"limit": 100}, "work_offers", 0, models.UpsertWorkOfferFromJSON)
+	scrapePages(ctx, s, db, "transaction.getPaginatedTransactions", map[string]any{"limit": 100}, "transactions", 0, models.UpsertTransactionFromJSON)
 
 	// Articles: get newest
-	scrapePages(ctx, s, db, "article.getArticlesPaginated", map[string]any{"type": "last", "limit": 100}, 0, models.UpsertArticleFromJSON)
+	scrapePages(ctx, s, db, "article.getArticlesPaginated", map[string]any{"type": "last", "limit": 100}, "articles", 0, models.UpsertArticleFromJSON)
 
-	// Articles: top 1000 for daily, weekly, top (10 pages of 100)
+	// Articles: top 1000 for daily, weekly, top (sorted by likes, not time — can't rely on exists check)
 	for _, t := range []string{"daily", "weekly", "top"} {
-		scrapePages(ctx, s, db, "article.getArticlesPaginated", map[string]any{"type": t, "limit": 100}, 1000, models.UpsertArticleFromJSON)
+		scrapePages(ctx, s, db, "article.getArticlesPaginated", map[string]any{"type": t, "limit": 100}, "articles", 1000, models.UpsertArticleFromJSON)
 	}
+}
+
+func existsInDB(db *gorm.DB, table string, id string) bool {
+	var count int64
+	db.Table(table).Where("id = ?", id).Count(&count)
+	return count > 0
 }
 
 func scrapePages(
@@ -74,6 +80,7 @@ func scrapePages(
 	db *gorm.DB,
 	method string,
 	baseInput map[string]any,
+	table string,
 	maxItems int,
 	upsertFn func(*gorm.DB, json.RawMessage) error,
 ) {
@@ -115,6 +122,18 @@ func scrapePages(
 		items := resp.Result.Data.Items
 		if len(items) == 0 {
 			break
+		}
+
+		// Check if the first item already exists — if so, we've caught up
+		var firstID struct {
+			ID string `json:"_id"`
+		}
+		err = json.Unmarshal(items[0], &firstID)
+		if err == nil && firstID.ID != "" {
+			if existsInDB(db, table, firstID.ID) {
+				slog.Info("Caught up, stopping pagination", "method", method, "total", totalUpserted)
+				break
+			}
 		}
 
 		for _, item := range items {

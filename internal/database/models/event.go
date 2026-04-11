@@ -80,12 +80,18 @@ func CreateEventFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		return fmt.Errorf("failed to parse event JSON: %w", err)
 	}
 
-	countries := make([]EventCountry, len(parsed.Countries))
-	for i, c := range parsed.Countries {
-		countries[i] = EventCountry{
+	countries := make([]EventCountry, 0, len(parsed.Countries))
+	seen := make(map[string]struct{}, len(parsed.Countries))
+	for _, c := range parsed.Countries {
+		_, ok := seen[c]
+		if ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		countries = append(countries, EventCountry{
 			EventID:   parsed.ID,
 			CountryID: c,
-		}
+		})
 	}
 
 	event := Event{
@@ -116,12 +122,18 @@ func UpsertEventFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		return fmt.Errorf("failed to parse event JSON: %w", err)
 	}
 
-	countries := make([]EventCountry, len(parsed.Countries))
-	for i, c := range parsed.Countries {
-		countries[i] = EventCountry{
+	countries := make([]EventCountry, 0, len(parsed.Countries))
+	seen := make(map[string]struct{}, len(parsed.Countries))
+	for _, c := range parsed.Countries {
+		_, ok := seen[c]
+		if ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		countries = append(countries, EventCountry{
 			EventID:   parsed.ID,
 			CountryID: c,
-		}
+		})
 	}
 
 	event := Event{
@@ -130,10 +142,19 @@ func UpsertEventFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		Data:      datatypes.JSON(raw),
 		CreatedAt: parsed.CreatedAt,
 		UpdatedAt: parsed.UpdatedAt,
-		Countries: countries,
 	}
 
-	return db.Save(&event).Error
+	return db.Transaction(func(tx *gorm.DB) error {
+		err := tx.Omit("Countries").Save(&event).Error
+		if err != nil {
+			return err
+		}
+		tx.Where("event_id = ?", parsed.ID).Delete(&EventCountry{})
+		if len(countries) > 0 {
+			return tx.Create(&countries).Error
+		}
+		return nil
+	})
 }
 
 type EventQuery struct {
