@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Hattorius/War-Era-Gateway/internal/api"
+	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
 )
 
 type TRPCRequest struct {
@@ -26,7 +26,7 @@ var allowedMethodSet = func() map[string]struct{} {
 	return m
 }()
 
-func trpc_handler(s *api.Scraper) http.HandlerFunc {
+func trpc_handler(s *scraper.Scraper) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		methodsString, ok := strings.CutPrefix(r.URL.Path, "/trpc/")
 		if !ok || methodsString == "" {

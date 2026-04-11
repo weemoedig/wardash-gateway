@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Hattorius/War-Era-Gateway/internal/api"
+	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -90,7 +90,7 @@ func main() {
 }
 
 func service() http.Handler {
-	s := api.NewScraper(api.WithFlushTimeout(time.Millisecond * 400))
+	s := scraper.NewScraper(scraper.WithFlushTimeout(time.Millisecond * 400))
 
 	r := chi.NewRouter()
 

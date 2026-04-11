@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/Hattorius/War-Era-Gateway/internal/api"
+	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
 )
 
 func data_handler(
 	ctx context.Context,
-	s *api.Scraper,
+	s *scraper.Scraper,
 	method string,
 	input json.RawMessage,
 ) (json.RawMessage, error) {
