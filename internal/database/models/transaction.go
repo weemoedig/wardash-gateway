@@ -90,6 +90,72 @@ func CreateTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
 	return db.Create(&txn).Error
 }
 
+func UpsertTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
+	var parsed struct {
+		ID              string    `json:"_id"`
+		TransactionType string    `json:"transactionType"`
+		ItemCode        string    `json:"itemCode"`
+		SellerID        string    `json:"sellerId"`
+		BuyerID         string    `json:"buyerId"`
+		SellerCountryID string    `json:"sellerCountryId"`
+		BuyerCountryID  string    `json:"buyerCountryId"`
+		SellerMuID      string    `json:"sellerMuId"`
+		BuyerMuID       string    `json:"buyerMuId"`
+		SellerPartyID   string    `json:"sellerPartyId"`
+		BuyerPartyID    string    `json:"buyerPartyId"`
+		CreatedAt       time.Time `json:"createdAt"`
+		UpdatedAt       time.Time `json:"updatedAt"`
+	}
+
+	err := json.Unmarshal(raw, &parsed)
+	if err != nil {
+		return fmt.Errorf("failed to parse transaction JSON: %w", err)
+	}
+
+	var participants []TransactionParticipant
+	add := func(entityID, entityType, role string) {
+		if entityID != "" {
+			participants = append(participants, TransactionParticipant{
+				TransactionID: parsed.ID,
+				EntityID:      entityID,
+				EntityType:    entityType,
+				Role:          role,
+			})
+		}
+	}
+
+	add(parsed.SellerID, "user", "seller")
+	add(parsed.BuyerID, "user", "buyer")
+	add(parsed.SellerCountryID, "country", "seller")
+	add(parsed.BuyerCountryID, "country", "buyer")
+	add(parsed.SellerMuID, "mu", "seller")
+	add(parsed.BuyerMuID, "mu", "buyer")
+	add(parsed.SellerPartyID, "party", "seller")
+	add(parsed.BuyerPartyID, "party", "buyer")
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		txn := Transaction{
+			ID:              parsed.ID,
+			TransactionType: parsed.TransactionType,
+			ItemCode:        parsed.ItemCode,
+			Data:            datatypes.JSON(raw),
+			CreatedAt:       parsed.CreatedAt,
+			UpdatedAt:       parsed.UpdatedAt,
+		}
+
+		err := tx.Save(&txn).Error
+		if err != nil {
+			return err
+		}
+
+		if len(participants) > 0 {
+			tx.Where("transaction_id = ?", parsed.ID).Delete(&TransactionParticipant{})
+			return tx.Create(&participants).Error
+		}
+		return nil
+	})
+}
+
 type TransactionQuery struct {
 	Limit           int
 	Cursor          string

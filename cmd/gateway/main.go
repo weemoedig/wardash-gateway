@@ -10,10 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Hattorius/War-Era-Gateway/internal/database"
 	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"gorm.io/gorm"
 )
 
 var allowedMethods = []string{
@@ -63,7 +65,13 @@ func main() {
 		addr = "127.0.0.1:8080"
 	}
 
-	server := &http.Server{Addr: addr, Handler: service()}
+	db, err := database.Connect()
+	if err != nil {
+		slog.Error("Failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+
+	server := &http.Server{Addr: addr, Handler: service(db)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -82,14 +90,14 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err := server.Shutdown(shutdownCtx)
+	err = server.Shutdown(shutdownCtx)
 	if err != nil {
 		slog.Error("Failed gracefully shutting down server!", "error", err)
 		os.Exit(1)
 	}
 }
 
-func service() http.Handler {
+func service(db *gorm.DB) http.Handler {
 	s := scraper.NewScraper(scraper.WithFlushTimeout(time.Millisecond * 400))
 
 	r := chi.NewRouter()
@@ -106,7 +114,7 @@ func service() http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.CleanPath)
 
-	trpc_handler := trpc_handler(s)
+	trpc_handler := trpc_handler(s, db)
 	r.Method(http.MethodGet, "/trpc/*", trpc_handler)
 	r.Method(http.MethodPost, "/trpc/*", trpc_handler)
 

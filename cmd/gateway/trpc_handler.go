@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
+	"gorm.io/gorm"
 )
 
 type TRPCRequest struct {
@@ -26,7 +27,7 @@ var allowedMethodSet = func() map[string]struct{} {
 	return m
 }()
 
-func trpc_handler(s *scraper.Scraper) http.HandlerFunc {
+func trpc_handler(s *scraper.Scraper, db *gorm.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		methodsString, ok := strings.CutPrefix(r.URL.Path, "/trpc/")
 		if !ok || methodsString == "" {
@@ -72,7 +73,7 @@ func trpc_handler(s *scraper.Scraper) http.HandlerFunc {
 
 		ctx := r.Context()
 		for _, request := range requests {
-			response, err := data_handler(ctx, s, request.Method, request.Input)
+			response, err := data_handler(ctx, s, db, request.Method, request.Input)
 			if err != nil {
 				slog.Error("Received error from War Era API!", "error", err)
 				continue

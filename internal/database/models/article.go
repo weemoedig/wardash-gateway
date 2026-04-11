@@ -81,6 +81,40 @@ func CreateArticleFromJSON(db *gorm.DB, raw json.RawMessage) error {
 	return db.Create(&article).Error
 }
 
+func UpsertArticleFromJSON(db *gorm.DB, raw json.RawMessage) error {
+	var parsed struct {
+		ID       string `json:"_id"`
+		Author   string `json:"author"`
+		Category string `json:"category"`
+		Language string `json:"language"`
+		Stats    struct {
+			Likes int `json:"likes"`
+			Score int `json:"score"`
+		} `json:"stats"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+
+	err := json.Unmarshal(raw, &parsed)
+	if err != nil {
+		return fmt.Errorf("failed to parse article JSON: %w", err)
+	}
+
+	article := Article{
+		ID:        parsed.ID,
+		AuthorID:  parsed.Author,
+		Category:  parsed.Category,
+		Language:  parsed.Language,
+		Likes:     parsed.Stats.Likes,
+		Score:     parsed.Stats.Score,
+		Data:      datatypes.JSON(raw),
+		CreatedAt: parsed.CreatedAt,
+		UpdatedAt: parsed.UpdatedAt,
+	}
+
+	return db.Save(&article).Error
+}
+
 type ArticleQuery struct {
 	Type              string // required: "daily", "weekly", "top", "last"
 	Limit             int

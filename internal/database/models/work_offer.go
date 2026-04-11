@@ -56,6 +56,36 @@ func CreateWorkOfferFromJSON(db *gorm.DB, raw json.RawMessage) error {
 	return db.Create(&offer).Error
 }
 
+func UpsertWorkOfferFromJSON(db *gorm.DB, raw json.RawMessage) error {
+	var parsed struct {
+		ID            string    `json:"_id"`
+		User          string    `json:"user"`
+		Region        string    `json:"region"`
+		MinEnergy     int       `json:"minEnergy"`
+		MinProduction int       `json:"minProduction"`
+		CreatedAt     time.Time `json:"createdAt"`
+		UpdatedAt     time.Time `json:"updatedAt"`
+	}
+
+	err := json.Unmarshal(raw, &parsed)
+	if err != nil {
+		return fmt.Errorf("failed to parse work offer JSON: %w", err)
+	}
+
+	offer := WorkOffer{
+		ID:            parsed.ID,
+		UserID:        parsed.User,
+		RegionID:      parsed.Region,
+		MinEnergy:     parsed.MinEnergy,
+		MinProduction: parsed.MinProduction,
+		Data:          datatypes.JSON(raw),
+		CreatedAt:     parsed.CreatedAt,
+		UpdatedAt:     parsed.UpdatedAt,
+	}
+
+	return db.Save(&offer).Error
+}
+
 type WorkOfferQuery struct {
 	Limit      int
 	Cursor     string

@@ -100,6 +100,42 @@ func CreateEventFromJSON(db *gorm.DB, raw json.RawMessage) error {
 	return db.Create(&event).Error
 }
 
+func UpsertEventFromJSON(db *gorm.DB, raw json.RawMessage) error {
+	var parsed struct {
+		ID        string   `json:"_id"`
+		Countries []string `json:"countries"`
+		Data      struct {
+			Type string `json:"type"`
+		} `json:"data"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+
+	err := json.Unmarshal(raw, &parsed)
+	if err != nil {
+		return fmt.Errorf("failed to parse event JSON: %w", err)
+	}
+
+	countries := make([]EventCountry, len(parsed.Countries))
+	for i, c := range parsed.Countries {
+		countries[i] = EventCountry{
+			EventID:   parsed.ID,
+			CountryID: c,
+		}
+	}
+
+	event := Event{
+		ID:        parsed.ID,
+		EventType: parsed.Data.Type,
+		Data:      datatypes.JSON(raw),
+		CreatedAt: parsed.CreatedAt,
+		UpdatedAt: parsed.UpdatedAt,
+		Countries: countries,
+	}
+
+	return db.Save(&event).Error
+}
+
 type EventQuery struct {
 	Limit      int
 	Cursor     string
