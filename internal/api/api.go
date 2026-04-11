@@ -3,12 +3,17 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 )
 
-func Request(
+func (s *Scraper) Request(
 	ctx context.Context,
 	method string,
 	input json.RawMessage,
-) {
-
+) (json.RawMessage, error) {
+	res, err := doGlobal(s.gb, method, input)
+	if err != nil {
+		slog.Error("Failed batching request to War Era API", "error", err)
+	}
+	return res, err
 }

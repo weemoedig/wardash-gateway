@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/Hattorius/War-Era-Gateway/internal/api"
 )
 
 type TRPCRequest struct {
@@ -24,7 +26,7 @@ var allowedMethodSet = func() map[string]struct{} {
 	return m
 }()
 
-func trpc_handler() http.HandlerFunc {
+func trpc_handler(s *api.Scraper) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		methodsString, ok := strings.CutPrefix(r.URL.Path, "/trpc/")
 		if !ok || methodsString == "" {
@@ -67,6 +69,17 @@ func trpc_handler() http.HandlerFunc {
 			"RETRIEVED REQUEST",
 			"requests", requests,
 		)
+
+		ctx := r.Context()
+		for _, request := range requests {
+			response, err := data_handler(ctx, s, request.Method, request.Input)
+			if err != nil {
+				slog.Error("Received error from War Era API!", "error", err)
+				continue
+			}
+
+			slog.Info("Received data from War Era API", "method", request.Method, "response", response)
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ const defaultBaseURL = "https://api2.warera.io/trpc/"
 
 type Scraper struct {
 	client       http.Client
+	gb           *GlobalBatcher
 	baseURL      string
 	apiKey       string
 	flushTimeout *time.Duration
@@ -19,13 +20,9 @@ type Scraper struct {
 type Option func(*Scraper)
 
 type batchCall struct {
-	method string
-	input  json.RawMessage
-}
-
-type batchBuilder struct {
-	s     *Scraper
-	calls []batchCall
+	method  string
+	input   json.RawMessage
+	process func(raw json.RawMessage) error
 }
 
 func WithFlushTimeout(timeout time.Duration) Option {
@@ -43,9 +40,6 @@ func NewScraper(opts ...Option) *Scraper {
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.gb = newGlobalBatcher(s)
 	return s
-}
-
-func (s *Scraper) NewBatch() *batchBuilder {
-	return &batchBuilder{s: s}
 }
