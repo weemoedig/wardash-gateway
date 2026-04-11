@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: local-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+        - war
+
+  gateway:
+    build:
+      dockerfile: Dockerfile
+      args:
+        CMD: gateway
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
+    networks:
+      - war
+      - web
+
+  scraper:
+    build:
+      dockerfile: Dockerfile
+      args:
+        CMD: scraper
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
+    networks:
+      - war
+
+volumes:
+  postgres_data:
+
+networks:
+  war:
+  web:
