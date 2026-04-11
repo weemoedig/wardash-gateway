@@ -43,7 +43,9 @@ func trpc_handler() http.HandlerFunc {
 				http.Error(w, "empty method name", http.StatusBadRequest)
 				return
 			}
-			if _, ok := allowedMethodSet[method]; !ok {
+
+			_, ok := allowedMethodSet[method]
+			if !ok {
 				http.Error(w, "unknown method: "+method, http.StatusBadRequest)
 				return
 			}
