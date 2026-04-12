@@ -98,7 +98,8 @@ func main() {
 }
 
 func service(db *gorm.DB) http.Handler {
-	s := scraper.NewScraper(scraper.WithFlushTimeout(time.Millisecond * 400))
+	flushTimeout := time.Millisecond * 400
+	s := scraper.NewScraper(scraper.WithFlushTimeout(&flushTimeout))
 
 	r := chi.NewRouter()
 

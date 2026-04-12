@@ -25,9 +25,9 @@ type batchCall struct {
 	process func(raw json.RawMessage) error
 }
 
-func WithFlushTimeout(timeout time.Duration) Option {
+func WithFlushTimeout(timeout *time.Duration) Option {
 	return func(s *Scraper) {
-		s.flushTimeout = &timeout
+		s.flushTimeout = timeout
 	}
 }
 
