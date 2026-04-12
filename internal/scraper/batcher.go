@@ -183,7 +183,9 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 		}
 	}
 
-	slog.Info("Batch dedup", "pending", len(pending), "unique", len(unique))
+	if gb.s.flushTimeout != nil {
+		slog.Info("Batch dedup", "pending", len(pending), "unique", len(unique))
+	}
 
 	methods := make([]string, 0, len(unique))
 	for _, u := range unique {
