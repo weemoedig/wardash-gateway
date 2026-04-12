@@ -136,11 +136,10 @@ func service(db *gorm.DB) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.CleanPath)
-	r.Use(apiKeyMiddleware)
 
 	trpc_handler := trpc_handler(pool, db)
-	r.Method(http.MethodGet, "/trpc/*", trpc_handler)
-	r.Method(http.MethodPost, "/trpc/*", trpc_handler)
+	r.With(apiKeyMiddleware).Method(http.MethodGet, "/trpc/*", trpc_handler)
+	r.With(apiKeyMiddleware).Method(http.MethodPost, "/trpc/*", trpc_handler)
 
 	return r
 }
