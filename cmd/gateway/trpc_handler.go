@@ -66,11 +66,6 @@ func trpc_handler(s *scraper.Scraper, db *gorm.DB) http.HandlerFunc {
 			return
 		}
 
-		slog.Info(
-			"RETRIEVED REQUEST",
-			"requests", requests,
-		)
-
 		ctx := r.Context()
 		responses := make([]json.RawMessage, len(requests))
 		for i, request := range requests {
