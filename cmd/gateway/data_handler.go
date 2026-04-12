@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 
 	"github.com/Hattorius/War-Era-Gateway/internal/database/models"
 	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
@@ -26,6 +27,45 @@ func buildTRPCResponse(items []json.RawMessage, cursor string) (json.RawMessage,
 	return json.Marshal(resp)
 }
 
+func withFallback(
+	ctx context.Context,
+	s *scraper.Scraper,
+	db *gorm.DB,
+	method string,
+	input json.RawMessage,
+	dbQuery func() (json.RawMessage, error),
+	upsertFn func(*gorm.DB, json.RawMessage) error,
+) (json.RawMessage, error) {
+	resp, err := dbQuery()
+	if err != nil {
+		return nil, err
+	}
+
+	var parsed trpcResponse
+	err = json.Unmarshal(resp, &parsed)
+	if err == nil && len(parsed.Result.Data.Items) > 0 {
+		return resp, nil
+	}
+
+	raw, err := s.Request(ctx, method, input)
+	if err != nil {
+		return nil, err
+	}
+
+	var apiResp trpcResponse
+	err = json.Unmarshal(raw, &apiResp)
+	if err == nil {
+		for _, item := range apiResp.Result.Data.Items {
+			err = upsertFn(db, item)
+			if err != nil {
+				slog.Error("Failed to upsert fallback item", "method", method, "error", err)
+			}
+		}
+	}
+
+	return raw, nil
+}
+
 func data_handler(
 	ctx context.Context,
 	c *gocache.Cache,
@@ -36,13 +76,21 @@ func data_handler(
 ) (json.RawMessage, error) {
 	switch method {
 	case "event.getEventsPaginated":
-		return handleEvents(db, input)
+		return withFallback(ctx, s, db, method, input, func() (json.RawMessage, error) {
+			return handleEvents(db, input)
+		}, models.UpsertEventFromJSON)
 	case "workOffer.getWorkOffersPaginated":
-		return handleWorkOffers(db, input)
+		return withFallback(ctx, s, db, method, input, func() (json.RawMessage, error) {
+			return handleWorkOffers(db, input)
+		}, models.UpsertWorkOfferFromJSON)
 	case "article.getArticlesPaginated":
-		return handleArticles(db, input)
+		return withFallback(ctx, s, db, method, input, func() (json.RawMessage, error) {
+			return handleArticles(db, input)
+		}, models.UpsertArticleFromJSON)
 	case "transaction.getPaginatedTransactions":
-		return handleTransactions(db, input)
+		return withFallback(ctx, s, db, method, input, func() (json.RawMessage, error) {
+			return handleTransactions(db, input)
+		}, models.UpsertTransactionFromJSON)
 	}
 
 	return cachedRequest(c, method, input, func() (json.RawMessage, error) {
