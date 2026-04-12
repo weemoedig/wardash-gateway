@@ -251,9 +251,18 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 	}
 
 	var items []json.RawMessage
-	err = json.Unmarshal(body, &items)
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		err = json.Unmarshal(body, &items)
+	} else {
+		var single json.RawMessage
+		err = json.Unmarshal(body, &single)
+		if err == nil {
+			items = []json.RawMessage{single}
+		}
+	}
 	if err != nil {
-		slog.Error("Could not unmarshal batch response as array", "body", string(body), "error", err)
+		slog.Error("Could not unmarshal batch response", "body", string(body), "error", err)
 		signalAll(pending, err)
 		return
 	}
