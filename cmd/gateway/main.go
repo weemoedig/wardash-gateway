@@ -18,6 +18,28 @@ import (
 	"gorm.io/gorm"
 )
 
+type contextKey struct{}
+
+func apiKeyFromContext(ctx context.Context) string {
+	v, ok := ctx.Value(contextKey{}).(string)
+	if ok {
+		return v
+	}
+	return ""
+}
+
+func apiKeyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-API-Key")
+		if key == "" {
+			http.Error(w, "missing X-API-Key header", http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), contextKey{}, key)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 var allowedMethods = []string{
 	"company.getById",
 	"company.getCompanies",
@@ -99,7 +121,7 @@ func main() {
 
 func service(db *gorm.DB) http.Handler {
 	flushTimeout := time.Millisecond * 400
-	s := scraper.NewScraper(scraper.WithFlushTimeout(&flushTimeout))
+	pool := scraper.NewPool(scraper.WithFlushTimeout(&flushTimeout))
 
 	r := chi.NewRouter()
 
@@ -114,8 +136,9 @@ func service(db *gorm.DB) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.CleanPath)
+	r.Use(apiKeyMiddleware)
 
-	trpc_handler := trpc_handler(s, db)
+	trpc_handler := trpc_handler(pool, db)
 	r.Method(http.MethodGet, "/trpc/*", trpc_handler)
 	r.Method(http.MethodPost, "/trpc/*", trpc_handler)
 

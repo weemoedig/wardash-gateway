@@ -27,7 +27,7 @@ var allowedMethodSet = func() map[string]struct{} {
 	return m
 }()
 
-func trpc_handler(s *scraper.Scraper, db *gorm.DB) http.HandlerFunc {
+func trpc_handler(pool *scraper.ScraperPool, db *gorm.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		methodsString, ok := strings.CutPrefix(r.URL.Path, "/trpc/")
 		if !ok || methodsString == "" {
@@ -67,6 +67,7 @@ func trpc_handler(s *scraper.Scraper, db *gorm.DB) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
+		s := pool.Get(apiKeyFromContext(ctx))
 		responses := make([]json.RawMessage, len(requests))
 		for i, request := range requests {
 			response, err := data_handler(ctx, s, db, request.Method, request.Input)

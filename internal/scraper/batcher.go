@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -228,6 +229,13 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", gb.s.apiKey)
+
+	err = gb.s.limiter.Wait(context.Background())
+	if err != nil {
+		slog.Error("Rate limiter error", "error", err)
+		signalAll(pending, err)
+		return
+	}
 
 	res, err := gb.s.client.Do(req)
 

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 const defaultBaseURL = "https://api2.warera.io/trpc/"
@@ -15,6 +17,7 @@ type Scraper struct {
 	baseURL      string
 	apiKey       string
 	flushTimeout *time.Duration
+	limiter      *rate.Limiter
 }
 
 type Option func(*Scraper)
@@ -37,11 +40,22 @@ func WithBaseURL(baseURL string) Option {
 	}
 }
 
+func WithAPIKey(apiKey string) Option {
+	return func(s *Scraper) {
+		s.apiKey = apiKey
+	}
+}
+
+func (s *Scraper) Close() {
+	s.gb.Close()
+}
+
 func NewScraper(opts ...Option) *Scraper {
 	s := &Scraper{
 		client:  http.Client{},
 		baseURL: defaultBaseURL,
 		apiKey:  os.Getenv("WARERA_API_KEY"),
+		limiter: rate.NewLimiter(rate.Every(time.Minute/200), 200),
 	}
 	for _, opt := range opts {
 		opt(s)
