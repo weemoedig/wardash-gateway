@@ -72,14 +72,32 @@ func trpc_handler(s *scraper.Scraper, db *gorm.DB) http.HandlerFunc {
 		)
 
 		ctx := r.Context()
-		for _, request := range requests {
+		responses := make([]json.RawMessage, len(requests))
+		for i, request := range requests {
 			response, err := data_handler(ctx, s, db, request.Method, request.Input)
 			if err != nil {
-				slog.Error("Received error from War Era API!", "error", err)
+				slog.Error("Received error from War Era API!", "error", err, "method", request.Method)
+				errResp, _ := json.Marshal(map[string]any{
+					"error": map[string]any{
+						"message": err.Error(),
+						"code":    -32603,
+						"data": map[string]any{
+							"code":       "INTERNAL_SERVER_ERROR",
+							"httpStatus": 500,
+						},
+					},
+				})
+				responses[i] = errResp
 				continue
 			}
+			responses[i] = response
+		}
 
-			slog.Info("Received data from War Era API", "method", request.Method, "response", response)
+		w.Header().Set("Content-Type", "application/json")
+		if len(responses) == 1 {
+			w.Write(responses[0])
+		} else {
+			json.NewEncoder(w).Encode(responses)
 		}
 	}
 }
