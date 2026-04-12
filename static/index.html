@@ -1,13 +1,1778 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>War Era Gateway</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <h1>War Era Gateway</h1>
-    <p>API gateway is running.</p>
-</body>
+    <meta
+      name="description"
+      content="Optimize your requests to the War Era API with caching, batching, and data storage."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <nav class="nav">
+      <div class="container nav-inner">
+        <span class="nav-logo">War Era Gateway</span>
+        <div class="nav-links">
+          <a href="#how-it-works">How It Works</a>
+          <a href="#caching">Caching</a>
+          <a href="#endpoints">Endpoints</a>
+          <a
+            href="https://github.com/Hattorius/War-Era-Gateway"
+            target="_blank"
+            rel="noopener"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="container">
+        <h1>War Era Gateway</h1>
+        <p class="subtitle">
+          Optimize your requests to the War Era API, through the gateway.
+          Caching, request batching, and data storage. Free to use.
+        </p>
+
+        <div class="quickstart">
+          <div class="code-block">
+            <code
+              ><span class="comment"
+                >Replace the base URL in your API calls</span
+              ><br />
+              <span class="url-old">https://api2.warera.io/trpc/</span><br />
+              <span class="url-new"
+                >https://gateway.warerastats.io/trpc/</span
+              ></code
+            >
+          </div>
+          <p class="attribution">
+            All we ask is attribution: Supported by
+            <a href="https://warerastats.io/" target="_blank" rel="noopener"
+              >warerastats.io</a
+            >
+          </p>
+        </div>
+
+        <div class="hero-links">
+          <a
+            href="https://warerastats.io/"
+            target="_blank"
+            rel="noopener"
+            class="primary"
+            >warerastats.io</a
+          >
+          <a href="https://discord.gg/VFcpPDys4b" target="_blank" rel="noopener"
+            >Discord</a
+          >
+          <a
+            href="https://github.com/Hattorius/War-Era-Gateway"
+            target="_blank"
+            rel="noopener"
+            >Source Code</a
+          >
+        </div>
+      </div>
+    </header>
+
+    <section id="how-it-works">
+      <div class="container">
+        <div class="section-header">
+          <h2>How It Works</h2>
+          <p>
+            The gateway sits between you and the War Era API, optimizing every
+            request.
+          </p>
+        </div>
+
+        <div class="flow">
+          <div class="flow-step">
+            <span class="step-label">Step 1</span>
+            <span class="step-title">Your Request</span>
+          </div>
+          <div class="flow-arrow">&rarr;</div>
+          <div class="flow-step">
+            <span class="step-label">Step 2</span>
+            <span class="step-title">Cache Check</span>
+          </div>
+          <div class="flow-arrow">&rarr;</div>
+          <div class="flow-step">
+            <span class="step-label">Step 3</span>
+            <span class="step-title">Database Check</span>
+          </div>
+          <div class="flow-arrow">&rarr;</div>
+          <div class="flow-step">
+            <span class="step-label">Step 4</span>
+            <span class="step-title">Batch &amp; Send</span>
+          </div>
+          <div class="flow-arrow">&rarr;</div>
+          <div class="flow-step">
+            <span class="step-label">Step 5</span>
+            <span class="step-title">War Era API</span>
+          </div>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat-card">
+            <p class="stat-label">Batching Window</p>
+            <p class="stat-value">400ms</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">Rate Limit</p>
+            <p class="stat-value">200/min</p>
+          </div>
+          <div class="stat-card">
+            <p class="stat-label">Request Dedup</p>
+            <p class="stat-value">Automatic</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="caching">
+      <div class="container">
+        <div class="section-header">
+          <h2>Caching &amp; Data Storage</h2>
+          <p>
+            Responses are cached by endpoint. Four data types are stored locally
+            in our database. If data is not yet available, it will be
+            requested from the War Era API, and you're directly contributing to
+            the Gateway systems.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Cache TTLs</h3>
+            <p class="card-description">
+              How long responses are cached per endpoint
+            </p>
+          </div>
+          <div class="card-content">
+            <table class="cache-table">
+              <thead>
+                <tr>
+                  <th>TTL</th>
+                  <th>Endpoints</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="badge badge-green">5 min</span></td>
+                  <td>
+                    <span class="mono">company.getById</span>,
+                    <span class="mono">country.getCountryById</span>,
+                    <span class="mono">country.getAllCountries</span>,
+                    <span class="mono">government.getByCountryId</span>,
+                    <span class="mono">region.getById</span>,
+                    <span class="mono">region.getRegionsObject</span>,
+                    <span class="mono">battle.getById</span>,
+                    <span class="mono">round.getById</span>,
+                    <span class="mono">itemOffer.getById</span>,
+                    <span class="mono">workOffer.getById</span>,
+                    <span class="mono">ranking.getRanking</span>,
+                    <span class="mono">gameConfig.getDates</span>,
+                    <span class="mono">gameConfig.getGameConfig</span>,
+                    <span class="mono">user.getUserLite</span>,
+                    <span class="mono">user.getUserById</span>,
+                    <span class="mono">article.getArticleById</span>,
+                    <span class="mono">article.getArticleLiteById</span>,
+                    <span class="mono">mu.getById</span>,
+                    <span class="mono">worker.getTotalWorkersCount</span>,
+                    <span class="mono">worker.getWorkers</span>,
+                    <span class="mono">inventory.fetchCurrentEquipment</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-yellow">10 min</span></td>
+                  <td><span class="mono">itemTrading.getPrices</span></td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-blue">2 min</span></td>
+                  <td><span class="mono">battleRanking.getRanking</span></td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-purple">Database</span></td>
+                  <td>
+                    <span class="mono">event.getEventsPaginated</span>,
+                    <span class="mono">article.getArticlesPaginated</span>,
+                    <span class="mono">workOffer.getWorkOffersPaginated</span>,
+                    <span class="mono"
+                      >transaction.getPaginatedTransactions</span
+                    ><br />
+                    served from our database, populated by our scraper
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section-header" style="margin-top: 2rem">
+          <h3>Stored Data Models</h3>
+          <p>These data types are continuously scraped and stored locally</p>
+        </div>
+
+        <div class="models-grid">
+          <div class="model-card">
+            <h4>Articles</h4>
+            <p>
+              All paginated articles: daily, weekly, top, and latest. Searchable
+              by category, language, and author.
+            </p>
+          </div>
+          <div class="model-card">
+            <h4>Events</h4>
+            <p>
+              All events by country and type. Supports filtering by country and
+              event type.
+            </p>
+          </div>
+          <div class="model-card">
+            <h4>Work Offers</h4>
+            <p>
+              Searchable by user, region, minimum energy, and production type.
+            </p>
+          </div>
+          <div class="model-card">
+            <h4>Transactions</h4>
+            <p>
+              All transactions with participants: users, countries, military
+              units, and parties as seller or buyer.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="endpoints">
+      <div class="container">
+        <div class="section-header">
+          <h2>Endpoints</h2>
+          <p>
+            All 38 supported tRPC endpoints. Works exactly like the real API,
+            just change the base URL. Every call uses GET and POST.
+          </p>
+        </div>
+
+        <details class="endpoint-group">
+          <summary>company <span class="tag-count">2 endpoints</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">company.getById</div>
+              <div class="endpoint-desc">
+                Retrieves detailed information about a specific company
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">companyId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the company</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">company.getCompanies</div>
+              <div class="endpoint-desc">
+                Retrieves a paginated list of companies with optional filtering
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter companies by user ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">perPage</td>
+                    <td class="param-type">number</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      Number of companies per page (1-100)
+                      <div class="param-meta">Default: <code>10</code></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">cursor</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Pagination cursor for next page</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>country <span class="tag-count">2 endpoints</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">country.getCountryById</div>
+              <div class="endpoint-desc">
+                Retrieves detailed information about a specific country
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">countryId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the country</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">country.getAllCountries</div>
+              <div class="endpoint-desc">
+                Retrieves a list of all available countries
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <p class="no-params">No parameters required</p>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>event <span class="tag-count">1 endpoint</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">event.getEventsPaginated</div>
+              <div class="endpoint-desc">
+                Retrieves a paginated list of events with optional country and
+                event type filters
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-purple">Database-backed</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">limit</td>
+                    <td class="param-type">number</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      The limit of events to get (1-100)
+                      <div class="param-meta">Default: <code>10</code></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">cursor</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>The cursor to get the next events</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">countryId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter events by country ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">eventTypes</td>
+                    <td class="param-type">array</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      Filter events by event types
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values"
+                          >warDeclared, peace_agreement, battleOpened,
+                          battleEnded, newPresident, regionTransfer, peaceMade,
+                          countryMoneyTransfer, depositDiscovered,
+                          depositDepleted, systemRevolt, bankruptcy,
+                          allianceFormed, allianceBroken, regionLiberated,
+                          strategicResourcesReshuffled, resistanceIncreased,
+                          resistanceDecreased, revolutionStarted,
+                          revolutionEnded, financedRevolt</span
+                        >
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>
+            government <span class="tag-count">1 endpoint</span>
+          </summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">government.getByCountryId</div>
+              <div class="endpoint-desc">
+                Retrieves government information for a specific country
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">countryId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the country</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>region <span class="tag-count">2 endpoints</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">region.getById</div>
+              <div class="endpoint-desc">
+                Retrieves detailed information about a specific region
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">regionId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the region</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">region.getRegionsObject</div>
+              <div class="endpoint-desc">
+                Retrieves a complete object containing all available regions
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <p class="no-params">No parameters required</p>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>battle <span class="tag-count">3 endpoints</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">battle.getById</div>
+              <div class="endpoint-desc">
+                Retrieves detailed information about a specific battle
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">battleId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the battle</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">battle.getLiveBattleData</div>
+              <div class="endpoint-desc">
+                Retrieves real-time battle data including current round
+                information
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">battleId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the battle</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">roundNumber</td>
+                    <td class="param-type">number</td>
+                    <td class="param-optional">optional</td>
+                    <td>Optional specific round number to retrieve</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">battle.getBattles</div>
+              <div class="endpoint-desc">Retrieves a list of battles</div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">isActive</td>
+                    <td class="param-type">boolean</td>
+                    <td class="param-optional">optional</td>
+                    <td>Whether to get active battles</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">limit</td>
+                    <td class="param-type">number</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      The limit of battles to get (1-100)
+                      <div class="param-meta">Default: <code>10</code></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">cursor</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>The cursor to get the next battles</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">direction</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      The direction to get the battles
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values">forward, backward</span>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">filter</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      Filter type for battles
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values"
+                          >all, yourCountry, yourEnemies</span
+                        >
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">defenderRegionId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter battles by defender region ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">warId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter battles by war ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">countryId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter battles by country ID</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>round <span class="tag-count">2 endpoints</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">round.getById</div>
+              <div class="endpoint-desc">
+                Retrieves detailed information about a specific battle round
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">roundId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the round</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">round.getLastHits</div>
+              <div class="endpoint-desc">
+                Retrieves the most recent hits/damages in a specific battle
+                round
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">roundId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the round</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>
+            battleRanking <span class="tag-count">1 endpoint</span>
+          </summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">battleRanking.getRanking</div>
+              <div class="endpoint-desc">
+                Retrieves damage, ground, or money rankings for users or
+                countries in battles, rounds, or wars
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-blue">2 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">dataType</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>
+                      Type of ranking data to retrieve
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values">damage, points, money</span>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">type</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>
+                      Whether to rank by user or country
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values">user, country, mu</span>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">side</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>
+                      Which side of the battle to rank
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values"
+                          >attacker, defender, merged</span
+                        >
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">battleId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Optional battle ID to filter rankings</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">roundId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Optional round ID to filter rankings</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">warId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Optional war ID to filter rankings</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>
+            itemTrading <span class="tag-count">1 endpoint</span>
+          </summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">itemTrading.getPrices</div>
+              <div class="endpoint-desc">
+                Retrieves current market prices for all tradeable items
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-yellow">10 min cache</span>
+              </div>
+              <p class="no-params">No parameters required</p>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>
+            tradingOrder <span class="tag-count">1 endpoint</span>
+          </summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">tradingOrder.getTopOrders</div>
+              <div class="endpoint-desc">
+                Retrieves the best orders for an item
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">itemCode</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The item code to get orders for</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">limit</td>
+                    <td class="param-type">integer</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      The limit of orders to get (max 100)
+                      <div class="param-meta">Default: <code>10</code></div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>itemOffer <span class="tag-count">1 endpoint</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">itemOffer.getById</div>
+              <div class="endpoint-desc">
+                Retrieves detailed information about a specific item offer
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">itemOfferId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the item offer</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>
+            workOffer <span class="tag-count">3 endpoints</span>
+          </summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">workOffer.getById</div>
+              <div class="endpoint-desc">
+                Retrieves detailed information about a specific work offer
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">workOfferId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the work offer</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">workOffer.getWorkOfferByCompanyId</div>
+              <div class="endpoint-desc">
+                Retrieves work offer for a specific company
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">companyId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the company</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">workOffer.getWorkOffersPaginated</div>
+              <div class="endpoint-desc">
+                Retrieves a paginated list of work offers with optional user and
+                region filtering
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-purple">Database-backed</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by user ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">regionId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by region ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">cursor</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Pagination cursor</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">limit</td>
+                    <td class="param-type">integer</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      Number of results
+                      <div class="param-meta">Default: <code>10</code></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">energy</td>
+                    <td class="param-type">number</td>
+                    <td class="param-optional">optional</td>
+                    <td>Minimum energy filter (min 0)</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">production</td>
+                    <td class="param-type">number</td>
+                    <td class="param-optional">optional</td>
+                    <td>Minimum production filter (min 0)</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">citizenship</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by citizenship</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>ranking <span class="tag-count">1 endpoint</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">ranking.getRanking</div>
+              <div class="endpoint-desc">
+                Retrieves ranking data for the specified ranking type
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">rankingType</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>
+                      The type of ranking to retrieve
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values"
+                          >weeklyCountryDamages, weeklyCountryDamagesPerCitizen,
+                          countryRegionDiff, countryDevelopment,
+                          countryActivePopulation, countryDamages,
+                          countryWealth, countryProductionBonus, countryBounty,
+                          weeklyUserDamages, userDamages, userWealth, userLevel,
+                          userReferrals, userSubscribers, userTerrain,
+                          userPremiumMonths, userPremiumGifts, userCasesOpened,
+                          userGemsPurchased, userBounty, muWeeklyDamages,
+                          muDamages, muTerrain, muWealth, muBounty</span
+                        >
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>search <span class="tag-count">1 endpoint</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">search.searchAnything</div>
+              <div class="endpoint-desc">
+                Performs a global search across users, countries, regions,
+                military units, parties, and other entities
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">searchText</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The search query string</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>
+            gameConfig <span class="tag-count">2 endpoints</span>
+          </summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">gameConfig.getDates</div>
+              <div class="endpoint-desc">
+                Retrieves game-related dates and timings
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <p class="no-params">No parameters required</p>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">gameConfig.getGameConfig</div>
+              <div class="endpoint-desc">
+                Retrieves static game configuration
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <p class="no-params">No parameters required</p>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>user <span class="tag-count">3 endpoints</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">user.getUserLite</div>
+              <div class="endpoint-desc">
+                Retrieves basic public information about a user including
+                username, skills, and rankings
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the user</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">user.getUsersByCountry</div>
+              <div class="endpoint-desc">
+                Retrieves a list of users by country
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">countryId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The country ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">limit</td>
+                    <td class="param-type">number</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      Number of results (1-100)
+                      <div class="param-meta">Default: <code>10</code></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">cursor</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Pagination cursor</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">user.getUserById</div>
+              <div class="endpoint-desc">
+                Retrieves public information about a user by their ID
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the user</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>article <span class="tag-count">3 endpoints</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">article.getArticleById</div>
+              <div class="endpoint-desc">
+                Retrieves detailed information about a specific article
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">articleId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The ID of the article to get</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">article.getArticleLiteById</div>
+              <div class="endpoint-desc">
+                Retrieves only the title and basic stats of an article without
+                counting as a view
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">articleId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The ID of the article to get</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">article.getArticlesPaginated</div>
+              <div class="endpoint-desc">
+                Retrieves a paginated list of articles
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-purple">Database-backed</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">type</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>
+                      The type of articles to get
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values"
+                          >daily, weekly, top, my, subscriptions, last</span
+                        >
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">limit</td>
+                    <td class="param-type">number</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      The limit of articles to get (1-100)
+                      <div class="param-meta">Default: <code>10</code></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">cursor</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Pagination cursor</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>The user ID to get articles for</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">categories</td>
+                    <td class="param-type">array</td>
+                    <td class="param-optional">optional</td>
+                    <td>The categories to filter by</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">languages</td>
+                    <td class="param-type">array</td>
+                    <td class="param-optional">optional</td>
+                    <td>The languages to filter by</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">positiveScoreOnly</td>
+                    <td class="param-type">boolean</td>
+                    <td class="param-optional">optional</td>
+                    <td>Only show articles with a positive score</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>mu <span class="tag-count">2 endpoints</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">mu.getById</div>
+              <div class="endpoint-desc">
+                Retrieves detailed information about a specific military unit
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">muId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the military unit</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">mu.getManyPaginated</div>
+              <div class="endpoint-desc">
+                Retrieves a paginated list of military units with optional
+                filters
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">limit</td>
+                    <td class="param-type">number</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      Number of results (1-100)
+                      <div class="param-meta">Default: <code>20</code></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">cursor</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Pagination cursor</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">memberId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by member ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by user ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">search</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Search query</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>
+            transaction <span class="tag-count">1 endpoint</span>
+          </summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">
+                transaction.getPaginatedTransactions
+              </div>
+              <div class="endpoint-desc">
+                Retrieves a paginated list of transactions
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-purple">Database-backed</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">limit</td>
+                    <td class="param-type">integer</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      The limit of transactions to get (max 100)
+                      <div class="param-meta">Default: <code>10</code></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">cursor</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>The cursor to get the next page</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by user ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">muId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by military unit ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">countryId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by country ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">partyId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by party ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">itemCode</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by item code</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">transactionType</td>
+                    <td class="param-type">string | array</td>
+                    <td class="param-optional">optional</td>
+                    <td>
+                      The type(s) of transactions to get
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values"
+                          >applicationFee, trading, itemMarket, wage, donation,
+                          articleTip, openCase, craftItem, dismantleItem,
+                          battleLoot</span
+                        >
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>upgrade <span class="tag-count">1 endpoint</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">upgrade.getUpgradeByTypeAndEntity</div>
+              <div class="endpoint-desc">
+                Retrieves upgrade information for a specific upgrade type and
+                entity (region, company, or military unit)
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">upgradeType</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>
+                      The upgrade type to get
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values"
+                          >bunker, base, pacificationCenter, storage,
+                          automatedEngine, breakRoom, headquarters,
+                          dormitories</span
+                        >
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">regionId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>The region ID to get upgrade for</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">companyId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>The company ID to get upgrade for</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">muId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>The military unit ID to get upgrade for</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>worker <span class="tag-count">2 endpoints</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">worker.getWorkers</div>
+              <div class="endpoint-desc">Get workers for a company or user</div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">companyId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by company ID</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-optional">optional</td>
+                    <td>Filter by user ID</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="endpoint">
+              <div class="endpoint-name">worker.getTotalWorkersCount</div>
+              <div class="endpoint-desc">
+                Get total workers count for a user
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The user ID</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>
+            battleOrder <span class="tag-count">1 endpoint</span>
+          </summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">battleOrder.getByBattle</div>
+              <div class="endpoint-desc">
+                Retrieves active battle orders for a specific battle and side
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">battleId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The unique identifier of the battle</td>
+                  </tr>
+                  <tr>
+                    <td class="param-name">side</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>
+                      Which side to get orders for
+                      <div class="param-meta">
+                        Values:
+                        <span class="enum-values">attacker, defender</span>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
+        <details class="endpoint-group">
+          <summary>inventory <span class="tag-count">1 endpoint</span></summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">inventory.fetchCurrentEquipment</div>
+              <div class="endpoint-desc">
+                Retrieves the currently equipped items for a user
+              </div>
+              <div class="endpoint-cache">
+                <span class="badge badge-green">5 min cache</span>
+              </div>
+              <table class="params-table">
+                <thead>
+                  <tr>
+                    <th>Parameter</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="param-name">userId</td>
+                    <td class="param-type">string</td>
+                    <td class="param-required">required</td>
+                    <td>The user ID</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="container">
+        <p>
+          Open source on
+          <a
+            href="https://github.com/Hattorius/War-Era-Gateway"
+            target="_blank"
+            rel="noopener"
+            >GitHub</a
+          >
+        </p>
+        <p>
+          Created by
+          <a href="https://warerastats.io/" target="_blank" rel="noopener"
+            >warerastats.io</a
+          >
+        </p>
+      </div>
+    </footer>
+  </body>
 </html>
