@@ -40,6 +40,7 @@ services:
     restart: unless-stopped
     depends_on:
       - postgres
+      - gateway
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
       WARERA_API_KEY: ${WARERA_API_KEY}
