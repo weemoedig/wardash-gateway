@@ -31,7 +31,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	s := scraper.NewScraper()
+	s := scraper.NewScraper(scraper.WithBaseURL("http://gateway:8080/trpc/"))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -62,7 +62,7 @@ func scrapeAll(ctx context.Context, s *scraper.Scraper, db *gorm.DB) {
 	// Articles: get newest
 	scrapePages(ctx, s, db, "article.getArticlesPaginated", map[string]any{"type": "last", "limit": 100}, "articles", 0, models.UpsertArticleFromJSON)
 
-	// Articles: top 1000 for daily, weekly, top (sorted by likes, not time — can't rely on exists check)
+	// Articles: top 1000 for daily, weekly, top (sorted by likes, not time)
 	for _, t := range []string{"daily", "weekly", "top"} {
 		scrapePages(ctx, s, db, "article.getArticlesPaginated", map[string]any{"type": t, "limit": 100}, "articles", 1000, models.UpsertArticleFromJSON)
 	}
@@ -124,14 +124,12 @@ func scrapePages(
 			break
 		}
 
-		// Check if the first item already exists — if so, we've caught up
 		var firstID struct {
 			ID string `json:"_id"`
 		}
 		err = json.Unmarshal(items[0], &firstID)
 		if err == nil && firstID.ID != "" {
 			if existsInDB(db, table, firstID.ID) {
-				slog.Info("Caught up, stopping pagination", "method", method, "total", totalUpserted)
 				break
 			}
 		}
@@ -144,8 +142,6 @@ func scrapePages(
 		}
 
 		totalUpserted += len(items)
-		slog.Info("Scraped page", "method", method, "items", len(items), "total", totalUpserted)
-
 		cursor = resp.Result.Data.NextCursor
 		if cursor == "" {
 			break

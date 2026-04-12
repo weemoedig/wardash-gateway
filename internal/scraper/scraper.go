@@ -31,6 +31,12 @@ func WithFlushTimeout(timeout time.Duration) Option {
 	}
 }
 
+func WithBaseURL(baseURL string) Option {
+	return func(s *Scraper) {
+		s.baseURL = baseURL
+	}
+}
+
 func NewScraper(opts ...Option) *Scraper {
 	s := &Scraper{
 		client:  http.Client{},

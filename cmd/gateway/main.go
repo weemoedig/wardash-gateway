@@ -62,7 +62,7 @@ var allowedMethods = []string{
 func main() {
 	addr := os.Getenv("LISTEN")
 	if addr == "" {
-		addr = "127.0.0.1:8080"
+		addr = "0.0.0.0:8080"
 	}
 
 	db, err := database.Connect()
