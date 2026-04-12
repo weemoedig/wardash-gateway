@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
+	gocache "github.com/patrickmn/go-cache"
 	"gorm.io/gorm"
 )
 
@@ -27,7 +28,7 @@ var allowedMethodSet = func() map[string]struct{} {
 	return m
 }()
 
-func trpc_handler(pool *scraper.ScraperPool, db *gorm.DB) http.HandlerFunc {
+func trpc_handler(pool *scraper.ScraperPool, c *gocache.Cache, db *gorm.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		methodsString, ok := strings.CutPrefix(r.URL.Path, "/trpc/")
 		if !ok || methodsString == "" {
@@ -70,7 +71,7 @@ func trpc_handler(pool *scraper.ScraperPool, db *gorm.DB) http.HandlerFunc {
 		s := pool.Get(apiKeyFromContext(ctx))
 		responses := make([]json.RawMessage, len(requests))
 		for i, request := range requests {
-			response, err := data_handler(ctx, s, db, request.Method, request.Input)
+			response, err := data_handler(ctx, c, s, db, request.Method, request.Input)
 			if err != nil {
 				slog.Error("Received error from War Era API!", "error", err, "method", request.Method)
 				errResp, _ := json.Marshal(map[string]any{

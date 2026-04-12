@@ -6,6 +6,7 @@ import (
 
 	"github.com/Hattorius/War-Era-Gateway/internal/database/models"
 	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
+	gocache "github.com/patrickmn/go-cache"
 	"gorm.io/gorm"
 )
 
@@ -27,6 +28,7 @@ func buildTRPCResponse(items []json.RawMessage, cursor string) (json.RawMessage,
 
 func data_handler(
 	ctx context.Context,
+	c *gocache.Cache,
 	s *scraper.Scraper,
 	db *gorm.DB,
 	method string,
@@ -43,7 +45,9 @@ func data_handler(
 		return handleTransactions(db, input)
 	}
 
-	return s.Request(ctx, method, input)
+	return cachedRequest(c, method, input, func() (json.RawMessage, error) {
+		return s.Request(ctx, method, input)
+	})
 }
 
 func handleEvents(db *gorm.DB, input json.RawMessage) (json.RawMessage, error) {

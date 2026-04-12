@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	gocache "github.com/patrickmn/go-cache"
 	"gorm.io/gorm"
 )
 
@@ -122,6 +123,7 @@ func main() {
 func service(db *gorm.DB) http.Handler {
 	flushTimeout := time.Millisecond * 400
 	pool := scraper.NewPool(scraper.WithFlushTimeout(&flushTimeout))
+	c := gocache.New(5*time.Minute, 10*time.Minute)
 
 	r := chi.NewRouter()
 
@@ -137,7 +139,7 @@ func service(db *gorm.DB) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.CleanPath)
 
-	trpc_handler := trpc_handler(pool, db)
+	trpc_handler := trpc_handler(pool, c, db)
 	r.With(apiKeyMiddleware).Method(http.MethodGet, "/trpc/*", trpc_handler)
 	r.With(apiKeyMiddleware).Method(http.MethodPost, "/trpc/*", trpc_handler)
 
