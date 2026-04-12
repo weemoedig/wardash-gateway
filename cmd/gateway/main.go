@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Hattorius/War-Era-Gateway/internal/database"
 	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
+	"github.com/Hattorius/War-Era-Gateway/static"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -142,6 +144,15 @@ func service(db *gorm.DB) http.Handler {
 	trpc_handler := trpc_handler(pool, c, db)
 	r.With(apiKeyMiddleware).Method(http.MethodGet, "/trpc/*", trpc_handler)
 	r.With(apiKeyMiddleware).Method(http.MethodPost, "/trpc/*", trpc_handler)
+
+	staticSub, _ := fs.Sub(static.Files, ".")
+	staticFS := http.FileServer(http.FS(staticSub))
+	r.Handle("/static/*", http.StripPrefix("/static/", staticFS))
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		index, _ := static.Files.ReadFile("index.html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(index)
+	})
 
 	return r
 }
