@@ -1,0 +1,4 @@
+
+gateway.warerastats.io {
+    reverse_proxy gateway:8080
+}
