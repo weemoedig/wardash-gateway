@@ -31,7 +31,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	s := scraper.NewScraper(scraper.WithBaseURL("http://gateway:8080/trpc/"), scraper.WithFlushTimeout(nil))
+	timeout := 200 * time.Millisecond
+	s := scraper.NewScraper(scraper.WithFlushTimeout(&timeout))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
