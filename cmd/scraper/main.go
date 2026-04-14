@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	timeout := 200 * time.Millisecond
+	timeout := 400 * time.Millisecond
 	s := scraper.NewScraper(scraper.WithFlushTimeout(&timeout))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -56,17 +57,27 @@ func main() {
 }
 
 func scrapeAll(ctx context.Context, s *scraper.Scraper, db *gorm.DB) {
-	scrapePages(ctx, s, db, "event.getEventsPaginated", map[string]any{"limit": 100}, "events", 0, models.UpsertEventFromJSON)
-	scrapePages(ctx, s, db, "workOffer.getWorkOffersPaginated", map[string]any{"limit": 100}, "work_offers", 0, models.UpsertWorkOfferFromJSON)
-	scrapePages(ctx, s, db, "transaction.getPaginatedTransactions", map[string]any{"limit": 100}, "transactions", 0, models.UpsertTransactionFromJSON)
+	var wg sync.WaitGroup
+
+	run := func(method string, input map[string]any, table string, maxItems int, upsertFn func(*gorm.DB, json.RawMessage) error) {
+		wg.Go(func() {
+			scrapePages(ctx, s, db, method, input, table, maxItems, upsertFn)
+		})
+	}
+
+	run("event.getEventsPaginated", map[string]any{"limit": 100}, "events", 0, models.UpsertEventFromJSON)
+	run("workOffer.getWorkOffersPaginated", map[string]any{"limit": 100}, "work_offers", 0, models.UpsertWorkOfferFromJSON)
+	run("transaction.getPaginatedTransactions", map[string]any{"limit": 100}, "transactions", 0, models.UpsertTransactionFromJSON)
 
 	// Articles: get newest
-	scrapePages(ctx, s, db, "article.getArticlesPaginated", map[string]any{"type": "last", "limit": 100}, "articles", 0, models.UpsertArticleFromJSON)
+	run("article.getArticlesPaginated", map[string]any{"type": "last", "limit": 100}, "articles", 0, models.UpsertArticleFromJSON)
 
 	// Articles: top 1000 for daily, weekly, top (sorted by likes, not time)
 	for _, t := range []string{"daily", "weekly", "top"} {
-		scrapePages(ctx, s, db, "article.getArticlesPaginated", map[string]any{"type": t, "limit": 100}, "articles", 1000, models.UpsertArticleFromJSON)
+		run("article.getArticlesPaginated", map[string]any{"type": t, "limit": 100}, "articles", 1000, models.UpsertArticleFromJSON)
 	}
+
+	wg.Wait()
 }
 
 func existsInDB(db *gorm.DB, table string, id string) bool {
