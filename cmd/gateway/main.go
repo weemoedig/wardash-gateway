@@ -131,7 +131,7 @@ func service(db *gorm.DB) http.Handler {
 
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*"},
-		AllowedMethods:   []string{"GET", "POST"},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "X-API-Key"},
 		AllowCredentials: false,
 		MaxAge:           300,
