@@ -82,8 +82,8 @@ func CreateTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		TransactionType: parsed.TransactionType,
 		ItemCode:        parsed.ItemCode,
 		Data:            datatypes.JSON(raw),
-		CreatedAt:       parsed.CreatedAt,
-		UpdatedAt:       parsed.UpdatedAt,
+		CreatedAt:       parsed.CreatedAt.Truncate(time.Second),
+		UpdatedAt:       parsed.UpdatedAt.Truncate(time.Second),
 		Participants:    participants,
 	}
 
@@ -139,8 +139,8 @@ func UpsertTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
 			TransactionType: parsed.TransactionType,
 			ItemCode:        parsed.ItemCode,
 			Data:            datatypes.JSON(raw),
-			CreatedAt:       parsed.CreatedAt,
-			UpdatedAt:       parsed.UpdatedAt,
+			CreatedAt:       parsed.CreatedAt.Truncate(time.Second),
+			UpdatedAt:       parsed.UpdatedAt.Truncate(time.Second),
 		}
 
 		err := tx.Save(&txn).Error

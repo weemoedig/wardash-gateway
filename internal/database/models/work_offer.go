@@ -49,8 +49,8 @@ func CreateWorkOfferFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		MinEnergy:     parsed.MinEnergy,
 		MinProduction: parsed.MinProduction,
 		Data:          datatypes.JSON(raw),
-		CreatedAt:     parsed.CreatedAt,
-		UpdatedAt:     parsed.UpdatedAt,
+		CreatedAt:     parsed.CreatedAt.Truncate(time.Second),
+		UpdatedAt:     parsed.UpdatedAt.Truncate(time.Second),
 	}
 
 	return db.Create(&offer).Error
@@ -79,8 +79,8 @@ func UpsertWorkOfferFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		MinEnergy:     parsed.MinEnergy,
 		MinProduction: parsed.MinProduction,
 		Data:          datatypes.JSON(raw),
-		CreatedAt:     parsed.CreatedAt,
-		UpdatedAt:     parsed.UpdatedAt,
+		CreatedAt:     parsed.CreatedAt.Truncate(time.Second),
+		UpdatedAt:     parsed.UpdatedAt.Truncate(time.Second),
 	}
 
 	return db.Save(&offer).Error

@@ -98,8 +98,8 @@ func CreateEventFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		ID:        parsed.ID,
 		EventType: parsed.Data.Type,
 		Data:      datatypes.JSON(raw),
-		CreatedAt: parsed.CreatedAt,
-		UpdatedAt: parsed.UpdatedAt,
+		CreatedAt: parsed.CreatedAt.Truncate(time.Second),
+		UpdatedAt: parsed.UpdatedAt.Truncate(time.Second),
 		Countries: countries,
 	}
 
@@ -140,8 +140,8 @@ func UpsertEventFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		ID:        parsed.ID,
 		EventType: parsed.Data.Type,
 		Data:      datatypes.JSON(raw),
-		CreatedAt: parsed.CreatedAt,
-		UpdatedAt: parsed.UpdatedAt,
+		CreatedAt: parsed.CreatedAt.Truncate(time.Second),
+		UpdatedAt: parsed.UpdatedAt.Truncate(time.Second),
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {

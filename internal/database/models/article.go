@@ -74,8 +74,8 @@ func CreateArticleFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		Likes:     parsed.Stats.Likes,
 		Score:     parsed.Stats.Score,
 		Data:      datatypes.JSON(raw),
-		CreatedAt: parsed.CreatedAt,
-		UpdatedAt: parsed.UpdatedAt,
+		CreatedAt: parsed.CreatedAt.Truncate(time.Second),
+		UpdatedAt: parsed.UpdatedAt.Truncate(time.Second),
 	}
 
 	return db.Create(&article).Error
@@ -108,8 +108,8 @@ func UpsertArticleFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		Likes:     parsed.Stats.Likes,
 		Score:     parsed.Stats.Score,
 		Data:      datatypes.JSON(raw),
-		CreatedAt: parsed.CreatedAt,
-		UpdatedAt: parsed.UpdatedAt,
+		CreatedAt: parsed.CreatedAt.Truncate(time.Second),
+		UpdatedAt: parsed.UpdatedAt.Truncate(time.Second),
 	}
 
 	return db.Save(&article).Error

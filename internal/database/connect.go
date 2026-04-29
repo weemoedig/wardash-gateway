@@ -35,5 +35,12 @@ func Connect() (*gorm.DB, error) {
 	models.AddArticleIndexes(db)
 	models.AddTransactionIndexes(db)
 
+	for _, table := range []string{"transactions", "events", "work_offers", "articles"} {
+		db.Exec(fmt.Sprintf(
+			"UPDATE %s SET created_at = date_trunc('second', created_at) WHERE created_at != date_trunc('second', created_at)",
+			table,
+		))
+	}
+
 	return db, nil
 }

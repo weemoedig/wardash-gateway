@@ -43,12 +43,16 @@ func withFallback(
 
 	var parsed trpcResponse
 	err = json.Unmarshal(resp, &parsed)
-	if err == nil && len(parsed.Result.Data.Items) > 0 {
+	if err == nil && len(parsed.Result.Data.Items) > 0 && parsed.Result.Data.NextCursor != "" {
 		return resp, nil
 	}
 
-	raw, err := s.Request(ctx, method, input)
+	apiInput := withLimit100(input)
+	raw, err := s.Request(ctx, method, apiInput)
 	if err != nil {
+		if len(parsed.Result.Data.Items) > 0 {
+			return resp, nil
+		}
 		return nil, err
 	}
 
@@ -56,14 +60,30 @@ func withFallback(
 	err = json.Unmarshal(raw, &apiResp)
 	if err == nil {
 		for _, item := range apiResp.Result.Data.Items {
-			err = upsertFn(db, item)
-			if err != nil {
+			if err := upsertFn(db, item); err != nil {
 				slog.Error("Failed to upsert fallback item", "method", method, "error", err)
 			}
 		}
 	}
 
-	return raw, nil
+	dbResp, err := dbQuery()
+	if err != nil {
+		return raw, nil
+	}
+	return dbResp, nil
+}
+
+func withLimit100(input json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(input, &m); err != nil {
+		return input
+	}
+	m["limit"] = json.RawMessage("100")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return input
+	}
+	return out
 }
 
 func data_handler(
