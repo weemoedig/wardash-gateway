@@ -38,14 +38,33 @@ func Connect() (*gorm.DB, error) {
 
 	go func() {
 		for _, table := range []string{"transactions", "events", "work_offers", "articles"} {
-			result := db.Exec(fmt.Sprintf(
-				"UPDATE %s SET created_at = date_trunc('second', created_at) WHERE created_at != date_trunc('second', created_at)",
+			var needsMigration bool
+			db.Raw(fmt.Sprintf(
+				"SELECT EXISTS(SELECT 1 FROM %s WHERE created_at != date_trunc('second', created_at) LIMIT 1)",
 				table,
-			))
-			if result.Error != nil {
-				slog.Error("Failed to truncate timestamps", "table", table, "error", result.Error)
-			} else if result.RowsAffected > 0 {
-				slog.Info("Truncated timestamps", "table", table, "rows", result.RowsAffected)
+			)).Scan(&needsMigration)
+			if !needsMigration {
+				continue
+			}
+
+			slog.Info("Truncating timestamps", "table", table)
+			total := int64(0)
+			for {
+				result := db.Exec(fmt.Sprintf(
+					"UPDATE %s SET created_at = date_trunc('second', created_at) WHERE id IN (SELECT id FROM %s WHERE created_at != date_trunc('second', created_at) LIMIT 5000)",
+					table, table,
+				))
+				if result.Error != nil {
+					slog.Error("Failed to truncate timestamps", "table", table, "error", result.Error)
+					break
+				}
+				if result.RowsAffected == 0 {
+					break
+				}
+				total += result.RowsAffected
+			}
+			if total > 0 {
+				slog.Info("Truncated timestamps done", "table", table, "rows", total)
 			}
 		}
 	}()
