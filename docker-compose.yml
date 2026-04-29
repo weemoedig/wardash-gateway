@@ -16,11 +16,6 @@ services:
       retries: 10
     networks:
         - war
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   gateway:
     build:
@@ -35,11 +30,6 @@ services:
     networks:
       - war
       - web
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   scraper:
     build:
@@ -55,11 +45,6 @@ services:
       WARERA_API_KEY: ${WARERA_API_KEY}
     networks:
       - war
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   caddy:
     image: caddy:2
@@ -75,11 +60,6 @@ services:
       - gateway
     networks:
       - web
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
 volumes:
   postgres_data:
