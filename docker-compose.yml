@@ -16,6 +16,11 @@ services:
       retries: 10
     networks:
         - war
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   gateway:
     build:
@@ -24,13 +29,17 @@ services:
         CMD: gateway
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
     networks:
       - war
       - web
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   scraper:
     build:
@@ -39,15 +48,18 @@ services:
         CMD: scraper
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
-      gateway:
-        condition: service_started
+      - postgres
+      - gateway
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
       WARERA_API_KEY: ${WARERA_API_KEY}
     networks:
       - war
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   caddy:
     image: caddy:2
@@ -63,6 +75,11 @@ services:
       - gateway
     networks:
       - web
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:
