@@ -85,6 +85,8 @@ var allowedMethods = []string{
 }
 
 func main() {
+	slog.Info("Gateway starting")
+
 	addr := os.Getenv("LISTEN")
 	if addr == "" {
 		addr = "0.0.0.0:8080"

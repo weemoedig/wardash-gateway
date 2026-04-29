@@ -40,7 +40,7 @@ func Connect() (*gorm.DB, error) {
 		for _, table := range []string{"transactions", "events", "work_offers", "articles"} {
 			var needsMigration bool
 			db.Raw(fmt.Sprintf(
-				"SELECT EXISTS(SELECT 1 FROM %s WHERE created_at != date_trunc('second', created_at) LIMIT 1)",
+				"SELECT EXISTS(SELECT 1 FROM %s WHERE created_at != date_trunc('second', created_at))",
 				table,
 			)).Scan(&needsMigration)
 			if !needsMigration {
@@ -51,7 +51,7 @@ func Connect() (*gorm.DB, error) {
 			total := int64(0)
 			for {
 				result := db.Exec(fmt.Sprintf(
-					"UPDATE %s SET created_at = date_trunc('second', created_at) WHERE id IN (SELECT id FROM %s WHERE created_at != date_trunc('second', created_at) LIMIT 5000)",
+					"UPDATE %s SET created_at = date_trunc('second', created_at) WHERE id IN (SELECT id FROM %s WHERE created_at != date_trunc('second', created_at) LIMIT 1000)",
 					table, table,
 				))
 				if result.Error != nil {
