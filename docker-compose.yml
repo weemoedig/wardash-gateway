@@ -24,7 +24,8 @@ services:
         CMD: gateway
     restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
     networks:
@@ -38,8 +39,10 @@ services:
         CMD: scraper
     restart: unless-stopped
     depends_on:
-      - postgres
-      - gateway
+      postgres:
+        condition: service_healthy
+      gateway:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
       WARERA_API_KEY: ${WARERA_API_KEY}
