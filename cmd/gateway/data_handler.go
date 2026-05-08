@@ -29,6 +29,7 @@ func buildTRPCResponse(items []json.RawMessage, cursor string) (json.RawMessage,
 
 func withFallback(
 	ctx context.Context,
+	stats *Stats,
 	s *scraper.Scraper,
 	db *gorm.DB,
 	method string,
@@ -48,6 +49,7 @@ func withFallback(
 	}
 
 	apiInput := withLimit100(input)
+	stats.RecordForwarded()
 	raw, err := s.Request(ctx, method, apiInput)
 	if err != nil {
 		if len(parsed.Result.Data.Items) > 0 {
@@ -89,31 +91,35 @@ func withLimit100(input json.RawMessage) json.RawMessage {
 func data_handler(
 	ctx context.Context,
 	c *gocache.Cache,
+	stats *Stats,
 	s *scraper.Scraper,
 	db *gorm.DB,
 	method string,
 	input json.RawMessage,
 ) (json.RawMessage, error) {
+	stats.RecordReceived(method)
+
 	switch method {
 	case "event.getEventsPaginated":
-		return withFallback(ctx, s, db, method, input, func() (json.RawMessage, error) {
+		return withFallback(ctx, stats, s, db, method, input, func() (json.RawMessage, error) {
 			return handleEvents(db, input)
 		}, models.UpsertEventFromJSON)
 	case "workOffer.getWorkOffersPaginated":
-		return withFallback(ctx, s, db, method, input, func() (json.RawMessage, error) {
+		return withFallback(ctx, stats, s, db, method, input, func() (json.RawMessage, error) {
 			return handleWorkOffers(db, input)
 		}, models.UpsertWorkOfferFromJSON)
 	case "article.getArticlesPaginated":
-		return withFallback(ctx, s, db, method, input, func() (json.RawMessage, error) {
+		return withFallback(ctx, stats, s, db, method, input, func() (json.RawMessage, error) {
 			return handleArticles(db, input)
 		}, models.UpsertArticleFromJSON)
 	case "transaction.getPaginatedTransactions":
-		return withFallback(ctx, s, db, method, input, func() (json.RawMessage, error) {
+		return withFallback(ctx, stats, s, db, method, input, func() (json.RawMessage, error) {
 			return handleTransactions(db, input)
 		}, models.UpsertTransactionFromJSON)
 	}
 
 	return cachedRequest(c, method, input, func() (json.RawMessage, error) {
+		stats.RecordForwarded()
 		return s.Request(ctx, method, input)
 	})
 }

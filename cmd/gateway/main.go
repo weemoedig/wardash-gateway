@@ -92,13 +92,22 @@ func main() {
 		addr = "0.0.0.0:8080"
 	}
 
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+
 	db, err := database.Connect()
 	if err != nil {
 		slog.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
 	}
 
-	server := &http.Server{Addr: addr, Handler: service(db)}
+	stats := NewStats(dataDir+"/stats.json", allowedMethods)
+	stopStats := make(chan struct{})
+	go stats.Run(stopStats)
+
+	server := &http.Server{Addr: addr, Handler: service(db, stats)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -114,6 +123,8 @@ func main() {
 
 	<-ctx.Done()
 
+	close(stopStats)
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -124,7 +135,7 @@ func main() {
 	}
 }
 
-func service(db *gorm.DB) http.Handler {
+func service(db *gorm.DB, stats *Stats) http.Handler {
 	flushTimeout := time.Millisecond * 400
 	pool := scraper.NewPool(scraper.WithFlushTimeout(&flushTimeout))
 	c := gocache.New(5*time.Minute, 10*time.Minute)
@@ -143,9 +154,11 @@ func service(db *gorm.DB) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.CleanPath)
 
-	trpc_handler := trpc_handler(pool, c, db)
+	trpc_handler := trpc_handler(pool, c, db, stats)
 	r.With(apiKeyMiddleware).Method(http.MethodGet, "/trpc/*", trpc_handler)
 	r.With(apiKeyMiddleware).Method(http.MethodPost, "/trpc/*", trpc_handler)
+
+	r.Get("/api/stats", stats.HTTPHandler())
 
 	staticSub, _ := fs.Sub(static.Files, ".")
 	staticFS := http.FileServer(http.FS(staticSub))
@@ -154,6 +167,12 @@ func service(db *gorm.DB) http.Handler {
 		index, _ := static.Files.ReadFile("index.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(index)
+	})
+
+	r.Get("/stats", func(w http.ResponseWriter, r *http.Request) {
+		page, _ := static.Files.ReadFile("stats.html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(page)
 	})
 
 	return r

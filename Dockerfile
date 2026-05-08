@@ -21,7 +21,8 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=build /out/app /app/app
 
-RUN adduser -D -H appuser && chown -R appuser:appuser /app
+RUN mkdir -p /app/data && \
+    adduser -D -H appuser && chown -R appuser:appuser /app
 USER appuser
 
 ENTRYPOINT ["/app/app"]

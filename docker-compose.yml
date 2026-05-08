@@ -32,6 +32,9 @@ services:
       - postgres
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
     networks:
       - war
       - web

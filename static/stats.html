@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Statistics - War Era Gateway</title>
+    <meta
+      name="description"
+      content="Live traffic statistics for the War Era Gateway over the past 24 hours."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <nav class="nav">
+      <div class="container nav-inner">
+        <span class="nav-logo">War Era Gateway</span>
+        <div class="nav-links">
+          <a href="/">Home</a>
+          <a href="/stats" class="nav-active">Stats</a>
+          <a
+            href="https://github.com/Hattorius/War-Era-Gateway"
+            target="_blank"
+            rel="noopener"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero" style="padding: 3rem 0 1.5rem">
+      <div class="container">
+        <h1>Gateway Statistics</h1>
+        <p class="subtitle">
+          Live traffic data over the past 24 hours. Updates every 60 seconds.
+        </p>
+      </div>
+    </header>
+
+    <section id="stats-content">
+      <div class="container">
+        <div id="no-data" style="display: none">
+          <div class="card" style="text-align: center; padding: 3rem 1.5rem">
+            <p style="font-size: 1.125rem; font-weight: 600; margin-bottom: 0.5rem">
+              No data available yet
+            </p>
+            <p style="color: var(--muted-foreground); font-size: 0.875rem">
+              Statistics will appear after the first full hour of operation.
+            </p>
+          </div>
+        </div>
+
+        <div id="stats-loaded" style="display: none">
+          <div class="stats-row" style="margin-bottom: 2rem">
+            <div class="stat-card">
+              <p class="stat-label">Received by Gateway (24h)</p>
+              <p class="stat-value" id="total-received">-</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-label">Forwarded to War Era API (24h)</p>
+              <p class="stat-value" id="total-forwarded">-</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-label">Cache Hit Rate (24h)</p>
+              <p class="stat-value" id="cache-rate">-</p>
+            </div>
+          </div>
+
+          <div class="section-header">
+            <h2>Hourly Traffic</h2>
+            <p>Requests received vs forwarded, per hour</p>
+          </div>
+          <div class="card" style="margin-bottom: 2rem">
+            <div class="card-content">
+              <div class="chart-legend">
+                <span class="chart-legend-item">
+                  <span class="chart-legend-dot" style="background: var(--info)"></span>
+                  Received
+                </span>
+                <span class="chart-legend-item">
+                  <span class="chart-legend-dot" style="background: var(--warning)"></span>
+                  Forwarded
+                </span>
+              </div>
+              <div id="hourly-chart" class="hourly-chart"></div>
+            </div>
+          </div>
+
+          <div class="section-header">
+            <h2>Top 10 Methods</h2>
+            <p>Most called endpoints over the past 24 hours</p>
+          </div>
+          <div class="card">
+            <div class="card-content" style="padding: 0">
+              <table class="methods-table" id="methods-table">
+                <thead>
+                  <tr>
+                    <th style="width: 2.5rem">#</th>
+                    <th>Method</th>
+                    <th style="text-align: right">Calls</th>
+                    <th style="width: 40%"></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="container">
+        <p>
+          Open source on
+          <a
+            href="https://github.com/Hattorius/War-Era-Gateway"
+            target="_blank"
+            rel="noopener"
+            >GitHub</a
+          >
+        </p>
+        <p>
+          Created by
+          <a href="https://warerastats.io/" target="_blank" rel="noopener"
+            >warerastats.io</a
+          >
+        </p>
+      </div>
+    </footer>
+
+    <script>
+      function fmt(n) {
+        return n.toLocaleString();
+      }
+
+      function renderChart(history, current) {
+        const container = document.getElementById("hourly-chart");
+        container.innerHTML = "";
+
+        const allEntries = [...history];
+        if (current && (current.received > 0 || current.forwarded > 0)) {
+          allEntries.push(current);
+        }
+
+        if (allEntries.length === 0) return;
+
+        let maxVal = 0;
+        for (const entry of allEntries) {
+          if (entry.received > maxVal) maxVal = entry.received;
+          if (entry.forwarded > maxVal) maxVal = entry.forwarded;
+        }
+        if (maxVal === 0) maxVal = 1;
+
+        for (const entry of allEntries) {
+          const col = document.createElement("div");
+          col.className = "chart-col";
+
+          const bars = document.createElement("div");
+          bars.className = "chart-bars";
+
+          const recBar = document.createElement("div");
+          recBar.className = "chart-bar chart-bar-received";
+          recBar.style.height = Math.max((entry.received / maxVal) * 100, 1) + "%";
+          recBar.title = "Received: " + fmt(entry.received);
+
+          const fwdBar = document.createElement("div");
+          fwdBar.className = "chart-bar chart-bar-forwarded";
+          fwdBar.style.height = Math.max((entry.forwarded / maxVal) * 100, 1) + "%";
+          fwdBar.title = "Forwarded: " + fmt(entry.forwarded);
+
+          bars.appendChild(recBar);
+          bars.appendChild(fwdBar);
+
+          const label = document.createElement("div");
+          label.className = "chart-label";
+          const d = new Date(entry.hour);
+          label.textContent = d.getUTCHours().toString().padStart(2, "0") + ":00";
+
+          col.appendChild(bars);
+          col.appendChild(label);
+          container.appendChild(col);
+        }
+      }
+
+      function renderMethods(topMethods) {
+        const tbody = document.querySelector("#methods-table tbody");
+        tbody.innerHTML = "";
+
+        if (topMethods.length === 0) return;
+
+        const maxCount = topMethods[0].count;
+
+        topMethods.forEach(function (m, i) {
+          const tr = document.createElement("tr");
+
+          const tdRank = document.createElement("td");
+          tdRank.textContent = i + 1;
+          tdRank.style.color = "var(--muted-foreground)";
+          tdRank.style.fontSize = "0.8125rem";
+
+          const tdName = document.createElement("td");
+          tdName.className = "mono";
+          tdName.style.fontSize = "0.8125rem";
+          tdName.textContent = m.method;
+
+          const tdCount = document.createElement("td");
+          tdCount.style.textAlign = "right";
+          tdCount.style.fontVariantNumeric = "tabular-nums";
+          tdCount.style.fontSize = "0.8125rem";
+          tdCount.textContent = fmt(m.count);
+
+          const tdBar = document.createElement("td");
+          const barWrap = document.createElement("div");
+          barWrap.className = "method-bar-wrap";
+          const bar = document.createElement("div");
+          bar.className = "method-bar";
+          bar.style.width = (maxCount > 0 ? (m.count / maxCount) * 100 : 0) + "%";
+          barWrap.appendChild(bar);
+          tdBar.appendChild(barWrap);
+
+          tr.appendChild(tdRank);
+          tr.appendChild(tdName);
+          tr.appendChild(tdCount);
+          tr.appendChild(tdBar);
+          tbody.appendChild(tr);
+        });
+      }
+
+      function update(data) {
+        const noData = document.getElementById("no-data");
+        const loaded = document.getElementById("stats-loaded");
+
+        const hasHistory = data.history && data.history.length > 0;
+        const hasCurrent = data.current && (data.current.received > 0 || data.current.forwarded > 0);
+
+        if (!hasHistory && !hasCurrent) {
+          noData.style.display = "";
+          loaded.style.display = "none";
+          return;
+        }
+
+        noData.style.display = "none";
+        loaded.style.display = "";
+
+        let totalRec = 0;
+        let totalFwd = 0;
+
+        if (data.history) {
+          for (const h of data.history) {
+            totalRec += h.received;
+            totalFwd += h.forwarded;
+          }
+        }
+        if (data.current) {
+          totalRec += data.current.received;
+          totalFwd += data.current.forwarded;
+        }
+
+        document.getElementById("total-received").textContent = fmt(totalRec);
+        document.getElementById("total-forwarded").textContent = fmt(totalFwd);
+
+        const rate = totalRec > 0 ? ((1 - totalFwd / totalRec) * 100).toFixed(1) : "0.0";
+        document.getElementById("cache-rate").textContent = rate + "%";
+
+        renderChart(data.history || [], data.current);
+        renderMethods(data.topMethods || []);
+      }
+
+      function fetchStats() {
+        fetch("/api/stats")
+          .then(function (r) { return r.json(); })
+          .then(update)
+          .catch(function (err) { console.error("Failed to fetch stats:", err); });
+      }
+
+      fetchStats();
+      setInterval(fetchStats, 60000);
+    </script>
+  </body>
+</html>
