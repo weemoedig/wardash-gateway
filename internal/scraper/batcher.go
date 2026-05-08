@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const urlSizeThreshold = 15_000
+const maxBatchSize = 50
 
 type Future[T any] struct {
 	val     T
@@ -78,10 +78,7 @@ func addGlobal(gb *GlobalBatcher, method string, input json.RawMessage) *Future[
 }
 
 func (gb *GlobalBatcher) loop() {
-	var (
-		pending []pendingCall
-		urlLen  int
-	)
+	var pending []pendingCall
 
 	var timer *time.Timer
 	var timerC <-chan time.Time
@@ -91,16 +88,12 @@ func (gb *GlobalBatcher) loop() {
 		timerC = timer.C
 	}
 
-	baseLen := len(gb.s.baseURL) + len("?batch=1")
-	urlLen = baseLen
-
 	flush := func() {
 		if len(pending) == 0 {
 			return
 		}
 		batch := pending
 		pending = nil
-		urlLen = baseLen
 		go gb.executePending(batch)
 	}
 
@@ -129,20 +122,11 @@ func (gb *GlobalBatcher) loop() {
 				continue
 			}
 
-			addLen := len(call.call.method)
-			if len(pending) > 0 {
-				addLen++
-			}
-
-			if len(pending) > 0 && urlLen+addLen > urlSizeThreshold {
+			if len(pending) >= maxBatchSize {
 				stopTimer()
 				flush()
 			}
 
-			if len(pending) > 0 {
-				urlLen++
-			}
-			urlLen += len(call.call.method)
 			pending = append(pending, call)
 
 			if len(pending) == 1 {
