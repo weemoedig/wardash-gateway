@@ -13,19 +13,21 @@ import (
 )
 
 type HourlySnapshot struct {
-	Hour      time.Time        `json:"hour"`
-	Received  int64            `json:"received"`
-	Forwarded int64            `json:"forwarded"`
-	Methods   map[string]int64 `json:"methods"`
+	Hour        time.Time        `json:"hour"`
+	Received    int64            `json:"received"`
+	Forwarded   int64            `json:"forwarded"`
+	CacheMisses int64            `json:"cacheMisses"`
+	Methods     map[string]int64 `json:"methods"`
 }
 
 type Stats struct {
-	currentReceived  atomic.Int64
-	currentForwarded atomic.Int64
-	currentMethods   []atomic.Int64
-	methodIndex      map[string]int
-	methodNames      []string
-	currentHour      time.Time
+	currentReceived    atomic.Int64
+	currentForwarded   atomic.Int64
+	currentCacheMisses atomic.Int64
+	currentMethods     []atomic.Int64
+	methodIndex        map[string]int
+	methodNames        []string
+	currentHour        time.Time
 
 	mu       sync.RWMutex
 	history  []HourlySnapshot
@@ -106,11 +108,18 @@ func (s *Stats) saveToDisk() {
 	}
 }
 
-func (s *Stats) RecordReceived(method string) {
+func (s *Stats) RecordRequest() {
 	s.currentReceived.Add(1)
+}
+
+func (s *Stats) RecordMethod(method string) {
 	if idx, ok := s.methodIndex[method]; ok {
 		s.currentMethods[idx].Add(1)
 	}
+}
+
+func (s *Stats) RecordCacheMiss() {
+	s.currentCacheMisses.Add(1)
 }
 
 func (s *Stats) RecordForwarded() {
@@ -127,10 +136,11 @@ func (s *Stats) snapshot() {
 	}
 
 	snap := HourlySnapshot{
-		Hour:      s.currentHour,
-		Received:  s.currentReceived.Swap(0),
-		Forwarded: s.currentForwarded.Swap(0),
-		Methods:   methods,
+		Hour:        s.currentHour,
+		Received:    s.currentReceived.Swap(0),
+		Forwarded:   s.currentForwarded.Swap(0),
+		CacheMisses: s.currentCacheMisses.Swap(0),
+		Methods:     methods,
 	}
 
 	s.mu.Lock()
@@ -155,10 +165,7 @@ func (s *Stats) snapshot() {
 func (s *Stats) Run(stop <-chan struct{}) {
 	for {
 		nextHour := s.currentHour.Add(time.Hour)
-		waitDuration := time.Until(nextHour)
-		if waitDuration < 0 {
-			waitDuration = 0
-		}
+		waitDuration := max(time.Until(nextHour), 0)
 
 		timer := time.NewTimer(waitDuration)
 		select {
@@ -176,10 +183,20 @@ type methodCount struct {
 	Count  int64  `json:"count"`
 }
 
+type statsSummary struct {
+	TotalReceived    int64   `json:"totalReceived"`
+	TotalForwarded   int64   `json:"totalForwarded"`
+	TotalMethods     int64   `json:"totalMethods"`
+	TotalCacheMisses int64   `json:"totalCacheMisses"`
+	CacheHitRate     float64 `json:"cacheHitRate"`
+	BatchEfficiency  float64 `json:"batchEfficiency"`
+}
+
 type statsResponse struct {
 	Current    *HourlySnapshot  `json:"current"`
 	History    []HourlySnapshot `json:"history"`
 	TopMethods []methodCount    `json:"topMethods"`
+	Summary    statsSummary     `json:"summary"`
 }
 
 func (s *Stats) buildResponse() statsResponse {
@@ -192,10 +209,11 @@ func (s *Stats) buildResponse() statsResponse {
 	}
 
 	current := &HourlySnapshot{
-		Hour:      s.currentHour,
-		Received:  s.currentReceived.Load(),
-		Forwarded: s.currentForwarded.Load(),
-		Methods:   currentMethods,
+		Hour:        s.currentHour,
+		Received:    s.currentReceived.Load(),
+		Forwarded:   s.currentForwarded.Load(),
+		CacheMisses: s.currentCacheMisses.Load(),
+		Methods:     currentMethods,
 	}
 
 	s.mu.RLock()
@@ -203,14 +221,24 @@ func (s *Stats) buildResponse() statsResponse {
 	copy(history, s.history)
 	s.mu.RUnlock()
 
+	var totalReceived, totalForwarded, totalCacheMisses, totalMethods int64
 	totals := make(map[string]int64, len(s.methodNames))
+
 	for _, snap := range history {
+		totalReceived += snap.Received
+		totalForwarded += snap.Forwarded
+		totalCacheMisses += snap.CacheMisses
 		for m, c := range snap.Methods {
 			totals[m] += c
+			totalMethods += c
 		}
 	}
+	totalReceived += current.Received
+	totalForwarded += current.Forwarded
+	totalCacheMisses += current.CacheMisses
 	for m, c := range currentMethods {
 		totals[m] += c
+		totalMethods += c
 	}
 
 	ranked := make([]methodCount, 0, len(totals))
@@ -224,10 +252,26 @@ func (s *Stats) buildResponse() statsResponse {
 		ranked = ranked[:10]
 	}
 
+	summary := statsSummary{
+		TotalReceived:    totalReceived,
+		TotalForwarded:   totalForwarded,
+		TotalMethods:     totalMethods,
+		TotalCacheMisses: totalCacheMisses,
+		CacheHitRate:     -1,
+		BatchEfficiency:  -1,
+	}
+	if totalMethods > 0 {
+		summary.CacheHitRate = 1.0 - float64(totalCacheMisses)/float64(totalMethods)
+	}
+	if totalCacheMisses > 0 {
+		summary.BatchEfficiency = 1.0 - float64(totalForwarded)/float64(totalCacheMisses)
+	}
+
 	return statsResponse{
 		Current:    current,
 		History:    history,
 		TopMethods: ranked,
+		Summary:    summary,
 	}
 }
 

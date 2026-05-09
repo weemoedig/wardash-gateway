@@ -18,6 +18,7 @@ type Scraper struct {
 	apiKey       string
 	flushTimeout *time.Duration
 	limiter      *rate.Limiter
+	onForward    func()
 }
 
 type Option func(*Scraper)
@@ -43,6 +44,12 @@ func WithBaseURL(baseURL string) Option {
 func WithAPIKey(apiKey string) Option {
 	return func(s *Scraper) {
 		s.apiKey = apiKey
+	}
+}
+
+func WithOnForward(fn func()) Option {
+	return func(s *Scraper) {
+		s.onForward = fn
 	}
 }
 

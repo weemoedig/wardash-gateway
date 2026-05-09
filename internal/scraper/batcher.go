@@ -237,6 +237,10 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 		return
 	}
 
+	if gb.s.onForward != nil {
+		gb.s.onForward()
+	}
+
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		slog.Error("Failed reading body", "error", err)

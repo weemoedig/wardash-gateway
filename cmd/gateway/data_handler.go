@@ -49,7 +49,7 @@ func withFallback(
 	}
 
 	apiInput := withLimit100(input)
-	stats.RecordForwarded()
+	stats.RecordCacheMiss()
 	raw, err := s.Request(ctx, method, apiInput)
 	if err != nil {
 		if len(parsed.Result.Data.Items) > 0 {
@@ -97,7 +97,7 @@ func data_handler(
 	method string,
 	input json.RawMessage,
 ) (json.RawMessage, error) {
-	stats.RecordReceived(method)
+	stats.RecordMethod(method)
 
 	switch method {
 	case "event.getEventsPaginated":
@@ -119,7 +119,7 @@ func data_handler(
 	}
 
 	return cachedRequest(c, method, input, func() (json.RawMessage, error) {
-		stats.RecordForwarded()
+		stats.RecordCacheMiss()
 		return s.Request(ctx, method, input)
 	})
 }

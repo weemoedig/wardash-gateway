@@ -67,6 +67,8 @@ func trpc_handler(pool *scraper.ScraperPool, c *gocache.Cache, db *gorm.DB, stat
 			return
 		}
 
+		stats.RecordRequest()
+
 		ctx := r.Context()
 		s := pool.Get(apiKeyFromContext(ctx))
 		responses := make([]json.RawMessage, len(requests))

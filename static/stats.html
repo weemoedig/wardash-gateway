@@ -69,6 +69,10 @@
               <p class="stat-label">Cache Hit Rate (24h)</p>
               <p class="stat-value" id="cache-rate">-</p>
             </div>
+            <div class="stat-card">
+              <p class="stat-label">Batch Efficiency (24h)</p>
+              <p class="stat-value" id="batch-efficiency">-</p>
+            </div>
           </div>
 
           <div class="section-header">
@@ -248,25 +252,21 @@
         noData.style.display = "none";
         loaded.style.display = "";
 
-        let totalRec = 0;
-        let totalFwd = 0;
+        const s = data.summary;
+        document.getElementById("total-received").textContent = fmt(s.totalReceived);
+        document.getElementById("total-forwarded").textContent = fmt(s.totalForwarded);
 
-        if (data.history) {
-          for (const h of data.history) {
-            totalRec += h.received;
-            totalFwd += h.forwarded;
-          }
-        }
-        if (data.current) {
-          totalRec += data.current.received;
-          totalFwd += data.current.forwarded;
+        if (s.cacheHitRate >= 0) {
+          document.getElementById("cache-rate").textContent = (s.cacheHitRate * 100).toFixed(1) + "%";
+        } else {
+          document.getElementById("cache-rate").textContent = "N/A";
         }
 
-        document.getElementById("total-received").textContent = fmt(totalRec);
-        document.getElementById("total-forwarded").textContent = fmt(totalFwd);
-
-        const rate = totalRec > 0 ? ((1 - totalFwd / totalRec) * 100).toFixed(1) : "0.0";
-        document.getElementById("cache-rate").textContent = rate + "%";
+        if (s.batchEfficiency >= 0) {
+          document.getElementById("batch-efficiency").textContent = (s.batchEfficiency * 100).toFixed(1) + "%";
+        } else {
+          document.getElementById("batch-efficiency").textContent = "N/A";
+        }
 
         renderChart(data.history || [], data.current);
         renderMethods(data.topMethods || []);

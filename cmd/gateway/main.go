@@ -137,7 +137,10 @@ func main() {
 
 func service(db *gorm.DB, stats *Stats) http.Handler {
 	flushTimeout := time.Millisecond * 400
-	pool := scraper.NewPool(scraper.WithFlushTimeout(&flushTimeout))
+	pool := scraper.NewPool(
+		scraper.WithFlushTimeout(&flushTimeout),
+		scraper.WithOnForward(stats.RecordForwarded),
+	)
 	c := gocache.New(5*time.Minute, 10*time.Minute)
 
 	r := chi.NewRouter()
