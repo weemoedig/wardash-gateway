@@ -4,12 +4,24 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 )
 
 const defaultBaseURL = "https://api2.warera.io/trpc/"
+
+var rateLimitHeaders = []string{
+	"Ratelimit-Limit",
+	"Ratelimit-Policy",
+	"Ratelimit-Remaining",
+	"Ratelimit-Reset",
+}
+
+type RateLimitInfo struct {
+	Headers http.Header
+}
 
 type Scraper struct {
 	client       http.Client
@@ -19,6 +31,9 @@ type Scraper struct {
 	flushTimeout *time.Duration
 	limiter      *rate.Limiter
 	onForward    func()
+
+	rlMu      sync.RWMutex
+	rateLimit RateLimitInfo
 }
 
 type Option func(*Scraper)
@@ -69,4 +84,22 @@ func NewScraper(opts ...Option) *Scraper {
 	}
 	s.gb = newGlobalBatcher(s)
 	return s
+}
+
+func (s *Scraper) storeRateLimitHeaders(h http.Header) {
+	info := RateLimitInfo{Headers: make(http.Header)}
+	for _, key := range rateLimitHeaders {
+		if v := h.Get(key); v != "" {
+			info.Headers.Set(key, v)
+		}
+	}
+	s.rlMu.Lock()
+	s.rateLimit = info
+	s.rlMu.Unlock()
+}
+
+func (s *Scraper) GetRateLimitHeaders() http.Header {
+	s.rlMu.RLock()
+	defer s.rlMu.RUnlock()
+	return s.rateLimit.Headers.Clone()
 }

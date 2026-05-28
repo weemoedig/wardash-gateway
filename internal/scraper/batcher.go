@@ -241,6 +241,8 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 		gb.s.onForward()
 	}
 
+	gb.s.storeRateLimitHeaders(res.Header)
+
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		slog.Error("Failed reading body", "error", err)

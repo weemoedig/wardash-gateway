@@ -93,6 +93,15 @@ func trpc_handler(pool *scraper.ScraperPool, c *gocache.Cache, db *gorm.DB, stat
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		for key, vals := range s.GetRateLimitHeaders() {
+			for i, v := range vals {
+				if i == 0 {
+					w.Header().Set(key, v)
+				} else {
+					w.Header().Add(key, v)
+				}
+			}
+		}
 		if len(responses) == 1 {
 			w.Write(responses[0])
 		} else {
