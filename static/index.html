@@ -169,11 +169,18 @@
                 <tr>
                   <td><span class="badge badge-green">5 min</span></td>
                   <td>
+                    <span class="mono">alliance.getById</span>,
                     <span class="mono">company.getById</span>,
+                    <span class="mono">company.getProductionBonus</span>,
+                    <span class="mono"
+                      >company.getRecommendedRegionIdsByItemCode</span
+                    >,
                     <span class="mono">country.getCountryById</span>,
                     <span class="mono">country.getAllCountries</span>,
                     <span class="mono">government.getByCountryId</span>,
+                    <span class="mono">party.getById</span>,
                     <span class="mono">region.getById</span>,
+                    <span class="mono">region.getAll</span>,
                     <span class="mono">region.getRegionsObject</span>,
                     <span class="mono">battle.getById</span>,
                     <span class="mono">round.getById</span>,
@@ -187,6 +194,11 @@
                     <span class="mono">article.getArticleById</span>,
                     <span class="mono">article.getArticleLiteById</span>,
                     <span class="mono">mu.getById</span>,
+                    <span class="mono">tournament.getById</span>,
+                    <span class="mono">tournament.getLastTournament</span>,
+                    <span class="mono">tournamentTeam.getById</span>,
+                    <span class="mono">tournamentTeam.getByTournamentId</span>,
+                    <span class="mono">war.getById</span>,
                     <span class="mono">worker.getTotalWorkersCount</span>,
                     <span class="mono">worker.getWorkers</span>,
                     <span class="mono">inventory.fetchCurrentEquipment</span>
@@ -198,7 +210,12 @@
                 </tr>
                 <tr>
                   <td><span class="badge badge-blue">2 min</span></td>
-                  <td><span class="mono">battleRanking.getRanking</span></td>
+                  <td>
+                    <span class="mono">battleRanking.getRanking</span>,
+                    <span class="mono"
+                      >battleLootSummary.getByBattleAndUser</span
+                    >
+                  </td>
                 </tr>
                 <tr>
                   <td><span class="badge badge-purple">Database</span></td>
@@ -259,10 +276,52 @@
         <div class="section-header">
           <h2>Endpoints</h2>
           <p>
-            All 38 supported tRPC endpoints. Works exactly like the real API,
+            All 54 supported tRPC endpoints. Works exactly like the real API,
             just change the base URL. Every call uses GET and POST.
           </p>
         </div>
+
+        <details class="endpoint-group">
+          <summary>
+            additional pass-through
+            <span class="tag-count">16 endpoints</span>
+          </summary>
+          <div class="endpoint-group-content">
+            <div class="endpoint">
+              <div class="endpoint-name">Explorer parity additions</div>
+              <div class="endpoint-desc">
+                These endpoints are enabled in the gateway whitelist and are
+                forwarded to the War Era API. Cached routes use the TTLs shown
+                above; paginated and search routes are pass-through unless they
+                already have database-backed handling.
+              </div>
+              <p class="no-params">
+                <span class="mono">alliance.getById</span>,
+                <span class="mono">alliance.getManyPaginated</span>,
+                <span class="mono"
+                  >battleLootSummary.getByBattleAndUser</span
+                >,
+                <span class="mono">company.getProductionBonus</span>,
+                <span class="mono"
+                  >company.getRecommendedRegionIdsByItemCode</span
+                >,
+                <span class="mono"
+                  >mercenaryContractAuction.getPaginatedAuctions</span
+                >,
+                <span class="mono">party.getById</span>,
+                <span class="mono">party.getManyPaginated</span>,
+                <span class="mono">region.getAll</span>,
+                <span class="mono">search.searchMus</span>,
+                <span class="mono">search.searchUsers</span>,
+                <span class="mono">tournament.getById</span>,
+                <span class="mono">tournament.getLastTournament</span>,
+                <span class="mono">tournamentTeam.getById</span>,
+                <span class="mono">tournamentTeam.getByTournamentId</span>,
+                <span class="mono">war.getById</span>
+              </p>
+            </div>
+          </div>
+        </details>
 
         <details class="endpoint-group">
           <summary>company <span class="tag-count">2 endpoints</span></summary>

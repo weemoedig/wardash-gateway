@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -24,12 +25,11 @@ func singleField(field string) func(json.RawMessage) string {
 		if err != nil {
 			return ""
 		}
-		var v string
 		raw, ok := m[field]
-		if ok {
-			json.Unmarshal(raw, &v)
+		if !ok {
+			return ""
 		}
-		return v
+		return jsonScalarKey(raw)
 	}
 }
 
@@ -42,25 +42,57 @@ func multiField(fields ...string) func(json.RawMessage) string {
 		}
 		parts := make([]string, len(fields))
 		for i, field := range fields {
-			var v string
 			raw, ok := m[field]
 			if ok {
-				json.Unmarshal(raw, &v)
+				parts[i] = jsonScalarKey(raw)
 			}
-			parts[i] = v
 		}
 		return strings.Join(parts, ":")
 	}
 }
 
+func jsonScalarKey(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return ""
+	}
+
+	switch value := v.(type) {
+	case bool:
+		return fmt.Sprintf("%t", value)
+	case float64:
+		return fmt.Sprintf("%g", value)
+	case nil:
+		return ""
+	default:
+		return ""
+	}
+}
+
 var cacheConfigs = map[string]cacheConfig{
 	"company.getById":                 {5 * time.Minute, singleField("companyId")},
+	"company.getProductionBonus":      {5 * time.Minute, singleField("companyId")},
+	"company.getRecommendedRegionIdsByItemCode": {
+		5 * time.Minute,
+		multiField("itemCode", "count"),
+	},
 	"country.getCountryById":          {5 * time.Minute, singleField("countryId")},
 	"country.getAllCountries":         {5 * time.Minute, staticKey()},
+	"alliance.getById":                {5 * time.Minute, singleField("allianceId")},
 	"government.getByCountryId":       {5 * time.Minute, singleField("countryId")},
 	"region.getById":                  {5 * time.Minute, singleField("regionId")},
+	"region.getAll":                   {5 * time.Minute, staticKey()},
 	"region.getRegionsObject":         {5 * time.Minute, staticKey()},
 	"battle.getById":                  {5 * time.Minute, singleField("battleId")},
+	"battleLootSummary.getByBattleAndUser": {
+		2 * time.Minute,
+		multiField("battleId", "userId"),
+	},
 	"round.getById":                   {5 * time.Minute, singleField("roundId")},
 	"itemTrading.getPrices":           {10 * time.Minute, staticKey()},
 	"itemOffer.getById":               {5 * time.Minute, singleField("itemOfferId")},
@@ -73,6 +105,15 @@ var cacheConfigs = map[string]cacheConfig{
 	"article.getArticleById":          {5 * time.Minute, singleField("articleId")},
 	"article.getArticleLiteById":      {5 * time.Minute, singleField("articleId")},
 	"mu.getById":                      {5 * time.Minute, singleField("muId")},
+	"party.getById":                   {5 * time.Minute, singleField("partyId")},
+	"tournament.getById":              {5 * time.Minute, singleField("tournamentId")},
+	"tournament.getLastTournament":    {5 * time.Minute, staticKey()},
+	"tournamentTeam.getById":          {5 * time.Minute, singleField("tournamentTeamId")},
+	"tournamentTeam.getByTournamentId": {
+		5 * time.Minute,
+		singleField("tournamentId"),
+	},
+	"war.getById":                     {5 * time.Minute, singleField("warId")},
 	"worker.getTotalWorkersCount":     {5 * time.Minute, singleField("userId")},
 	"worker.getWorkers":               {5 * time.Minute, multiField("companyId", "userId")},
 	"inventory.fetchCurrentEquipment": {5 * time.Minute, singleField("userId")},
