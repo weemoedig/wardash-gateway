@@ -44,7 +44,7 @@ func withFallback(
 
 	var parsed trpcResponse
 	err = json.Unmarshal(resp, &parsed)
-	if err == nil && len(parsed.Result.Data.Items) > 0 && parsed.Result.Data.NextCursor != "" {
+	if err == nil && len(parsed.Result.Data.Items) > 0 {
 		return resp, nil
 	}
 
@@ -96,6 +96,7 @@ func data_handler(
 	db *gorm.DB,
 	method string,
 	input json.RawMessage,
+	apiKey string,
 ) (json.RawMessage, error) {
 	stats.RecordMethod(method)
 
@@ -118,7 +119,7 @@ func data_handler(
 		}, models.UpsertTransactionFromJSON)
 	}
 
-	return cachedRequest(c, method, input, func() (json.RawMessage, error) {
+	return cachedRequest(c, method, input, apiKey, func() (json.RawMessage, error) {
 		stats.RecordCacheMiss()
 		return s.Request(ctx, method, input)
 	})

@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -9,7 +10,10 @@ import (
 const (
 	poolCleanupInterval = 60 * time.Second
 	poolIdleTimeout     = 5 * time.Minute
+	maxPoolEntries      = 1024
 )
+
+var ErrPoolFull = errors.New("scraper pool is full")
 
 type poolEntry struct {
 	scraper  *Scraper
@@ -17,30 +21,39 @@ type poolEntry struct {
 }
 
 type ScraperPool struct {
-	mu      sync.Mutex
-	entries map[string]*poolEntry
-	opts    []Option
-	stop    chan struct{}
+	mu         sync.Mutex
+	entries    map[string]*poolEntry
+	opts       []Option
+	stop       chan struct{}
+	maxEntries int
 }
 
 func NewPool(opts ...Option) *ScraperPool {
 	p := &ScraperPool{
-		entries: make(map[string]*poolEntry),
-		opts:    opts,
-		stop:    make(chan struct{}),
+		entries:    make(map[string]*poolEntry),
+		opts:       opts,
+		stop:       make(chan struct{}),
+		maxEntries: maxPoolEntries,
 	}
 	go p.cleanupLoop()
 	return p
 }
 
-func (p *ScraperPool) Get(apiKey string) *Scraper {
+func (p *ScraperPool) Get(apiKey string) (*Scraper, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	entry, ok := p.entries[apiKey]
 	if ok {
 		entry.lastUsed = time.Now()
-		return entry.scraper
+		return entry.scraper, nil
+	}
+
+	if len(p.entries) >= p.maxEntries {
+		p.evictIdleLocked(time.Now())
+	}
+	if len(p.entries) >= p.maxEntries {
+		return nil, ErrPoolFull
 	}
 
 	opts := make([]Option, len(p.opts)+1)
@@ -54,7 +67,7 @@ func (p *ScraperPool) Get(apiKey string) *Scraper {
 	}
 
 	slog.Info("Created new scraper for API key", "pool_size", len(p.entries))
-	return s
+	return s, nil
 }
 
 func (p *ScraperPool) Close() {
@@ -87,7 +100,10 @@ func (p *ScraperPool) evictIdle() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	now := time.Now()
+	p.evictIdleLocked(time.Now())
+}
+
+func (p *ScraperPool) evictIdleLocked(now time.Time) {
 	for key, entry := range p.entries {
 		if now.Sub(entry.lastUsed) > poolIdleTimeout {
 			slog.Info("Evicting idle scraper", "pool_size", len(p.entries)-1)

@@ -4,16 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const maxBatchSize = 50
+const maxLoggedErrorBodyBytes int64 = 4096
+
+var errBatcherClosed = errors.New("batcher is closed")
 
 type Future[T any] struct {
 	val     T
@@ -21,30 +26,38 @@ type Future[T any] struct {
 	batchCh chan error
 }
 
-func (f *Future[T]) Wait() (T, error) {
-	batchErr := <-f.batchCh
-	if batchErr != nil && f.err == nil {
-		f.err = batchErr
+func (f *Future[T]) Wait(ctx context.Context) (T, error) {
+	select {
+	case batchErr := <-f.batchCh:
+		if batchErr != nil && f.err == nil {
+			f.err = batchErr
+		}
+		return f.val, f.err
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
 	}
-	return f.val, f.err
 }
 
 type pendingCall struct {
+	ctx     context.Context
 	call    batchCall
 	batchCh chan error
 }
 
 type GlobalBatcher struct {
-	s      *Scraper
-	submit chan pendingCall
-	stop   chan struct{}
+	s          *Scraper
+	submit     chan pendingCall
+	stop       chan struct{}
+	executeSem chan struct{}
 }
 
 func newGlobalBatcher(s *Scraper) *GlobalBatcher {
 	gb := &GlobalBatcher{
-		s:      s,
-		submit: make(chan pendingCall, 512),
-		stop:   make(chan struct{}),
+		s:          s,
+		submit:     make(chan pendingCall, 512),
+		stop:       make(chan struct{}),
+		executeSem: make(chan struct{}, s.maxConcurrentBatches),
 	}
 	go gb.loop()
 	return gb
@@ -54,15 +67,26 @@ func (gb *GlobalBatcher) Close() {
 	close(gb.stop)
 }
 
-func doGlobal(gb *GlobalBatcher, method string, input json.RawMessage) (json.RawMessage, error) {
-	f := addGlobal(gb, method, input)
-	return f.Wait()
+func doGlobal(ctx context.Context, gb *GlobalBatcher, method string, input json.RawMessage) (json.RawMessage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	f, err := addGlobal(ctx, gb, method, input)
+	if err != nil {
+		return nil, err
+	}
+	return f.Wait(ctx)
 }
 
-func addGlobal(gb *GlobalBatcher, method string, input json.RawMessage) *Future[json.RawMessage] {
+func addGlobal(ctx context.Context, gb *GlobalBatcher, method string, input json.RawMessage) (*Future[json.RawMessage], error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	f := &Future[json.RawMessage]{batchCh: make(chan error, 1)}
 
-	gb.submit <- pendingCall{
+	pending := pendingCall{
+		ctx: ctx,
 		call: batchCall{
 			method: method,
 			input:  input,
@@ -74,7 +98,14 @@ func addGlobal(gb *GlobalBatcher, method string, input json.RawMessage) *Future[
 		batchCh: f.batchCh,
 	}
 
-	return f
+	select {
+	case gb.submit <- pending:
+		return f, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-gb.stop:
+		return nil, errBatcherClosed
+	}
 }
 
 func (gb *GlobalBatcher) loop() {
@@ -94,7 +125,15 @@ func (gb *GlobalBatcher) loop() {
 		}
 		batch := pending
 		pending = nil
-		go gb.executePending(batch)
+		select {
+		case gb.executeSem <- struct{}{}:
+			go func() {
+				defer func() { <-gb.executeSem }()
+				gb.executePending(batch)
+			}()
+		case <-gb.stop:
+			signalAll(batch, errBatcherClosed)
+		}
 	}
 
 	stopTimer := func() {
@@ -151,6 +190,11 @@ type uniqueCall struct {
 }
 
 func (gb *GlobalBatcher) executePending(pending []pendingCall) {
+	pending = activePending(pending)
+	if len(pending) == 0 {
+		return
+	}
+
 	seen := make(map[dedupKey]int)
 	var unique []uniqueCall
 
@@ -205,7 +249,10 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 		bodyReader = bytes.NewReader([]byte("{}"))
 	}
 
-	req, err := http.NewRequest("POST", reqURL, bodyReader)
+	reqCtx, cancelReq := batchRequestContext(pending, gb.s.upstreamTimeout)
+	defer cancelReq()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", reqURL, bodyReader)
 	if err != nil {
 		slog.Error("Failed creating request", "url", reqURL, "error", err)
 		signalAll(pending, err)
@@ -214,7 +261,7 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", gb.s.apiKey)
 
-	err = gb.s.limiter.Wait(context.Background())
+	err = gb.s.limiter.Wait(reqCtx)
 	if err != nil {
 		slog.Error("Rate limiter error", "error", err)
 		signalAll(pending, err)
@@ -231,7 +278,7 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 	defer res.Body.Close()
 
 	if res.StatusCode < 200 || res.StatusCode > 299 {
-		body, _ := io.ReadAll(res.Body)
+		body, _ := readLimited(res.Body, maxLoggedErrorBodyBytes)
 		slog.Error("Received fail response from request", "status_code", res.StatusCode, "body", string(body))
 		signalAll(pending, fmt.Errorf("http %d: %s", res.StatusCode, string(body)))
 		return
@@ -241,7 +288,7 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 		gb.s.onForward()
 	}
 
-	body, err := io.ReadAll(res.Body)
+	body, err := readLimited(res.Body, gb.s.maxResponseBytes)
 	if err != nil {
 		slog.Error("Failed reading body", "error", err)
 		signalAll(pending, err)
@@ -289,6 +336,79 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 			pending[pendingIdx].batchCh <- nil
 		}
 	}
+}
+
+func activePending(pending []pendingCall) []pendingCall {
+	active := pending[:0]
+	for _, p := range pending {
+		if p.ctx == nil {
+			p.ctx = context.Background()
+		}
+		if err := p.ctx.Err(); err != nil {
+			p.batchCh <- err
+			continue
+		}
+		active = append(active, p)
+	}
+	return active
+}
+
+func batchRequestContext(pending []pendingCall, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		timeout = defaultUpstreamTimeout
+	}
+
+	parents := make([]context.Context, 0, len(pending))
+	for _, p := range pending {
+		if p.ctx != nil && p.ctx.Err() == nil {
+			parents = append(parents, p.ctx)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	if len(parents) == 0 {
+		cancel()
+		return ctx, cancel
+	}
+
+	var mu sync.Mutex
+	remaining := len(parents)
+	stops := make([]func() bool, 0, len(parents))
+
+	for _, parent := range parents {
+		stop := context.AfterFunc(parent, func() {
+			mu.Lock()
+			remaining--
+			shouldCancel := remaining == 0
+			mu.Unlock()
+			if shouldCancel {
+				cancel()
+			}
+		})
+		stops = append(stops, stop)
+	}
+
+	return ctx, func() {
+		for _, stop := range stops {
+			stop()
+		}
+		cancel()
+	}
+}
+
+func readLimited(r io.Reader, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxResponseBytes
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("response body exceeds %d bytes", maxBytes)
+	}
+	return body, nil
 }
 
 func signalAll(pending []pendingCall, err error) {

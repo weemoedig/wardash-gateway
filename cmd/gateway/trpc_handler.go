@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,13 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 	"gorm.io/gorm"
 )
+
+const (
+	maxTRPCInputBytes        int64 = 1 << 20
+	maxTRPCMethodsPerRequest       = 50
+)
+
+var errTRPCInputTooLarge = errors.New("trpc input exceeds maximum size")
 
 type TRPCRequest struct {
 	Method string
@@ -41,6 +49,10 @@ func trpc_handler(pool *scraper.ScraperPool, c *gocache.Cache, db *gorm.DB, stat
 			http.Error(w, "no methods provided", http.StatusBadRequest)
 			return
 		}
+		if len(methods) > maxTRPCMethodsPerRequest {
+			http.Error(w, "too many methods in one request", http.StatusBadRequest)
+			return
+		}
 
 		for _, method := range methods {
 			if method == "" {
@@ -55,9 +67,13 @@ func trpc_handler(pool *scraper.ScraperPool, c *gocache.Cache, db *gorm.DB, stat
 			}
 		}
 
-		rawInput, err := readTRPCInput(r)
+		rawInput, err := readTRPCInput(w, r)
 		if err != nil {
-			http.Error(w, "failed to read input: "+err.Error(), http.StatusBadRequest)
+			status := http.StatusBadRequest
+			if errors.Is(err, errTRPCInputTooLarge) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			http.Error(w, "failed to read input: "+err.Error(), status)
 			return
 		}
 
@@ -70,10 +86,15 @@ func trpc_handler(pool *scraper.ScraperPool, c *gocache.Cache, db *gorm.DB, stat
 		stats.RecordRequest()
 
 		ctx := r.Context()
-		s := pool.Get(apiKeyFromContext(ctx))
+		apiKey := apiKeyFromContext(ctx)
+		s, err := pool.Get(apiKey)
+		if err != nil {
+			http.Error(w, "gateway request pool is unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		responses := make([]json.RawMessage, len(requests))
 		for i, request := range requests {
-			response, err := data_handler(ctx, c, stats, s, db, request.Method, request.Input)
+			response, err := data_handler(ctx, c, stats, s, db, request.Method, request.Input, apiKey)
 			if err != nil {
 				slog.Error("Received error from War Era API!", "error", err, "method", request.Method)
 				errResp, _ := json.Marshal(map[string]any{
@@ -101,9 +122,12 @@ func trpc_handler(pool *scraper.ScraperPool, c *gocache.Cache, db *gorm.DB, stat
 	}
 }
 
-func readTRPCInput(r *http.Request) ([]byte, error) {
+func readTRPCInput(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	input := r.URL.Query().Get("input")
 	if input != "" {
+		if int64(len(input)) > maxTRPCInputBytes {
+			return nil, errTRPCInputTooLarge
+		}
 		return []byte(input), nil
 	}
 
@@ -112,8 +136,11 @@ func readTRPCInput(r *http.Request) ([]byte, error) {
 	}
 	defer r.Body.Close()
 
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxTRPCInputBytes))
 	if err != nil {
+		if strings.Contains(err.Error(), "http: request body too large") {
+			return nil, errTRPCInputTooLarge
+		}
 		return nil, err
 	}
 

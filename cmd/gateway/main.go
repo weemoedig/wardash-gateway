@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +23,13 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	maxAPIKeyBytes                   = 512
+	gatewayAdminAPIKeyEnv            = "GATEWAY_ADMIN_API_KEY"
+	gatewayCORSAllowedOriginsEnv     = "GATEWAY_CORS_ALLOWED_ORIGINS"
+	gatewayEnablePublicStatsPagesEnv = "GATEWAY_ENABLE_PUBLIC_STATS"
+)
+
 type contextKey struct{}
 
 func apiKeyFromContext(ctx context.Context) string {
@@ -31,16 +40,43 @@ func apiKeyFromContext(ctx context.Context) string {
 	return ""
 }
 
+func apiKeyFromHeader(r *http.Request, header string) (string, bool) {
+	key := strings.TrimSpace(r.Header.Get(header))
+	if key == "" || len(key) > maxAPIKeyBytes {
+		return "", false
+	}
+	return key, true
+}
+
 func apiKeyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("X-API-Key")
-		if key == "" {
+		key, ok := apiKeyFromHeader(r, "X-API-Key")
+		if !ok {
 			http.Error(w, "missing X-API-Key header", http.StatusUnauthorized)
 			return
 		}
 		ctx := context.WithValue(r.Context(), contextKey{}, key)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func adminKeyMiddleware(adminKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if adminKey == "" {
+				http.NotFound(w, r)
+				return
+			}
+
+			key, ok := apiKeyFromHeader(r, "X-Gateway-Admin-Key")
+			if !ok || subtle.ConstantTimeCompare([]byte(key), []byte(adminKey)) != 1 {
+				http.Error(w, "missing or invalid X-Gateway-Admin-Key header", http.StatusUnauthorized)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 var allowedMethods = []string{
@@ -123,7 +159,15 @@ func main() {
 	stopStats := make(chan struct{})
 	go stats.Run(stopStats)
 
-	server := &http.Server{Addr: addr, Handler: service(db, stats)}
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           service(db, stats),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -151,7 +195,43 @@ func main() {
 	}
 }
 
+type serviceConfig struct {
+	adminAPIKey        string
+	corsAllowedOrigins []string
+	publicStats        bool
+}
+
+func loadServiceConfig() serviceConfig {
+	return serviceConfig{
+		adminAPIKey:        strings.TrimSpace(os.Getenv(gatewayAdminAPIKeyEnv)),
+		corsAllowedOrigins: splitCSV(os.Getenv(gatewayCORSAllowedOriginsEnv)),
+		publicStats:        parseBoolEnv(os.Getenv(gatewayEnablePublicStatsPagesEnv)),
+	}
+}
+
+func splitCSV(raw string) []string {
+	fields := strings.Split(raw, ",")
+	values := make([]string, 0, len(fields))
+	for _, field := range fields {
+		value := strings.TrimSpace(field)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func parseBoolEnv(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func service(db *gorm.DB, stats *Stats) http.Handler {
+	cfg := loadServiceConfig()
 	flushTimeout := time.Millisecond * 400
 	pool := scraper.NewPool(
 		scraper.WithFlushTimeout(&flushTimeout),
@@ -161,38 +241,51 @@ func service(db *gorm.DB, stats *Stats) http.Handler {
 
 	r := chi.NewRouter()
 
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://*", "http://*"},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"*"},
-		AllowCredentials: false,
-		MaxAge:           300,
-	}))
+	if len(cfg.corsAllowedOrigins) > 0 {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins: cfg.corsAllowedOrigins,
+			AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+			AllowedHeaders: []string{
+				"Content-Type",
+				"X-API-Key",
+				"X-Gateway-Admin-Key",
+			},
+			AllowCredentials: false,
+			MaxAge:           300,
+		}))
+	}
 
 	r.Use(middleware.Logger)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.CleanPath)
+	r.Use(middleware.Throttle(128))
 
 	trpc_handler := trpc_handler(pool, c, db, stats)
 	r.With(apiKeyMiddleware).Method(http.MethodGet, "/trpc/*", trpc_handler)
 	r.With(apiKeyMiddleware).Method(http.MethodPost, "/trpc/*", trpc_handler)
 
-	r.Get("/api/stats", stats.HTTPHandler())
+	if cfg.publicStats {
+		r.Get("/api/stats", stats.HTTPHandler())
+	} else {
+		r.With(adminKeyMiddleware(cfg.adminAPIKey)).Get("/api/stats", stats.HTTPHandler())
+	}
 
-	staticSub, _ := fs.Sub(static.Files, ".")
-	staticFS := http.FileServer(http.FS(staticSub))
-	r.Handle("/static/*", http.StripPrefix("/static/", staticFS))
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		index, _ := static.Files.ReadFile("index.html")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(index)
-	})
+	if cfg.publicStats {
+		staticSub, _ := fs.Sub(static.Files, ".")
+		staticFS := http.FileServer(http.FS(staticSub))
+		r.Handle("/static/*", http.StripPrefix("/static/", staticFS))
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			index, _ := static.Files.ReadFile("index.html")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(index)
+		})
 
-	r.Get("/stats", func(w http.ResponseWriter, r *http.Request) {
-		page, _ := static.Files.ReadFile("stats.html")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(page)
-	})
+		r.Get("/stats", func(w http.ResponseWriter, r *http.Request) {
+			page, _ := static.Files.ReadFile("stats.html")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(page)
+		})
+	}
 
 	return r
 }

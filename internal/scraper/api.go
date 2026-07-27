@@ -11,7 +11,7 @@ func (s *Scraper) Request(
 	method string,
 	input json.RawMessage,
 ) (json.RawMessage, error) {
-	res, err := doGlobal(s.gb, method, input)
+	res, err := doGlobal(ctx, s.gb, method, input)
 	if err != nil {
 		slog.Error("Failed batching request to War Era API", "error", err)
 	}

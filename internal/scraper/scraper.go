@@ -9,16 +9,24 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const defaultBaseURL = "https://api2.warera.io/trpc/"
+const (
+	defaultBaseURL              = "https://api2.warera.io/trpc/"
+	defaultUpstreamTimeout      = 10 * time.Second
+	defaultMaxResponseBytes     = 2 * 1024 * 1024
+	defaultMaxConcurrentBatches = 8
+)
 
 type Scraper struct {
-	client       http.Client
-	gb           *GlobalBatcher
-	baseURL      string
-	apiKey       string
-	flushTimeout *time.Duration
-	limiter      *rate.Limiter
-	onForward    func()
+	client               http.Client
+	gb                   *GlobalBatcher
+	baseURL              string
+	apiKey               string
+	flushTimeout         *time.Duration
+	limiter              *rate.Limiter
+	onForward            func()
+	upstreamTimeout      time.Duration
+	maxResponseBytes     int64
+	maxConcurrentBatches int
 }
 
 type Option func(*Scraper)
@@ -53,19 +61,53 @@ func WithOnForward(fn func()) Option {
 	}
 }
 
+func WithUpstreamTimeout(timeout time.Duration) Option {
+	return func(s *Scraper) {
+		s.upstreamTimeout = timeout
+		s.client.Timeout = timeout
+	}
+}
+
+func WithMaxResponseBytes(maxBytes int64) Option {
+	return func(s *Scraper) {
+		s.maxResponseBytes = maxBytes
+	}
+}
+
+func WithMaxConcurrentBatches(maxConcurrent int) Option {
+	return func(s *Scraper) {
+		s.maxConcurrentBatches = maxConcurrent
+	}
+}
+
 func (s *Scraper) Close() {
 	s.gb.Close()
 }
 
 func NewScraper(opts ...Option) *Scraper {
 	s := &Scraper{
-		client:  http.Client{},
-		baseURL: defaultBaseURL,
-		apiKey:  os.Getenv("WARERA_API_KEY"),
-		limiter: rate.NewLimiter(rate.Every(time.Minute/200), 200),
+		client:               http.Client{Timeout: defaultUpstreamTimeout},
+		baseURL:              defaultBaseURL,
+		apiKey:               os.Getenv("WARERA_API_KEY"),
+		limiter:              rate.NewLimiter(rate.Every(time.Minute/200), 200),
+		upstreamTimeout:      defaultUpstreamTimeout,
+		maxResponseBytes:     defaultMaxResponseBytes,
+		maxConcurrentBatches: defaultMaxConcurrentBatches,
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.upstreamTimeout <= 0 {
+		s.upstreamTimeout = defaultUpstreamTimeout
+	}
+	if s.client.Timeout <= 0 {
+		s.client.Timeout = s.upstreamTimeout
+	}
+	if s.maxResponseBytes <= 0 {
+		s.maxResponseBytes = defaultMaxResponseBytes
+	}
+	if s.maxConcurrentBatches <= 0 {
+		s.maxConcurrentBatches = defaultMaxConcurrentBatches
 	}
 	s.gb = newGlobalBatcher(s)
 	return s

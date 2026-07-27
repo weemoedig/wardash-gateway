@@ -68,10 +68,27 @@ static/           # Embedded HTML/CSS for the index page
 
 ### Environment Variables
 
-| Variable         | Required | Description                        |
-|------------------|----------|------------------------------------|
-| `DATABASE_URL`   | Yes      | PostgreSQL connection string       |
-| `WARERA_API_KEY` | Scraper  | War Era API key (scraper only)     |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `WARERA_API_KEY` | Scraper | War Era API key (scraper only) |
+| `GATEWAY_ADMIN_API_KEY` | Gateway | Required for `/api/stats` when public stats are disabled. Send it as `X-Gateway-Admin-Key`. |
+| `GATEWAY_CORS_ALLOWED_ORIGINS` | Optional | Comma-separated allowed CORS origins. Empty disables CORS headers. |
+| `GATEWAY_ENABLE_PUBLIC_STATS` | Optional | Set to `true` only for deliberate public/dev exposure of `/`, `/stats`, `/static/*` and unauthenticated `/api/stats`. |
+
+### Runtime Safety Defaults
+
+- tRPC input is capped at 1 MiB and one request may include at most 50 methods.
+- The HTTP server uses header, read, write and idle timeouts and throttles
+  concurrent handlers.
+- Upstream War Era calls use request context cancellation, a 10s timeout and a
+  2 MiB response body cap.
+- CORS is disabled unless explicit allowed origins are configured.
+- Public stats pages are disabled by default. `/api/stats` requires
+  `X-Gateway-Admin-Key` unless public stats are deliberately enabled.
+- Cache entries are scoped by API-key fingerprint. If a configured cache key
+  field is missing or not a scalar, the Gateway bypasses cache instead of using
+  a method-wide key.
 
 ## How It Works
 
