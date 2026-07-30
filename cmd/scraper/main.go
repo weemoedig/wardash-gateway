@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,10 +31,12 @@ type apiResponse struct {
 }
 
 const (
-	defaultScrapeIntervalSeconds    = 5
-	defaultScraperRequestsPerMinute = 200
-	defaultTransactionRetentionDays = 30
-	transactionPageLimit            = 100
+	defaultScrapeIntervalSeconds     = 5
+	defaultScraperRequestsPerMinute  = 200
+	defaultTransactionRetentionDays  = 30
+	transactionBackfillPagesPerCycle = 24
+	transactionPageLimit             = 100
+	transactionStateFilename         = "transaction-scraper-state.json"
 )
 
 type scraperDataset string
@@ -56,6 +59,7 @@ type scraperConfig struct {
 	datasets                 map[scraperDataset]struct{}
 	interval                 time.Duration
 	requestsPerMinute        int
+	stateFile                string
 	transactionRetentionDays int
 }
 
@@ -165,8 +169,17 @@ func loadScraperConfig() (scraperConfig, error) {
 		datasets:                 datasets,
 		interval:                 time.Duration(getScrapeIntervalSeconds()) * time.Second,
 		requestsPerMinute:        getScraperRequestsPerMinute(),
+		stateFile:                getTransactionStateFile(),
 		transactionRetentionDays: getTransactionRetentionDays(),
 	}, nil
+}
+
+func getTransactionStateFile() string {
+	dataDir := strings.TrimSpace(os.Getenv("DATA_DIR"))
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+	return filepath.Join(dataDir, transactionStateFilename)
 }
 
 func transactionCutoff(now time.Time, retentionDays int) time.Time {
@@ -216,25 +229,35 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	backfillState := transactionBackfillState{}
+	if config.datasetEnabled(datasetTransactions) {
+		backfillState, err = loadTransactionBackfillState(config.stateFile)
+		if err != nil {
+			slog.Error("Failed to load transaction backfill state", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	slog.Info(
 		"Scraper started",
+		"backfill_complete", backfillState.Completed,
 		"datasets", config.datasetNames(),
 		"interval_seconds", int(config.interval/time.Second),
 		"requests_per_minute", config.requestsPerMinute,
 		"transaction_retention_days", config.transactionRetentionDays,
 	)
 
-	if err := pruneExpiredTransactions(db, time.Now(), config.transactionRetentionDays); err != nil {
-		os.Exit(1)
-	}
-	if err := scrapeConfigured(ctx, s, db, config, true); err != nil {
-		os.Exit(1)
-	}
-
 	ticker := time.NewTicker(config.interval)
 	defer ticker.Stop()
 	retentionTicker := time.NewTicker(24 * time.Hour)
 	defer retentionTicker.Stop()
+
+	if err := pruneExpiredTransactions(db, time.Now(), config.transactionRetentionDays); err != nil {
+		os.Exit(1)
+	}
+	if err := scrapeConfigured(ctx, s, db, config, &backfillState); err != nil {
+		os.Exit(1)
+	}
 
 	for {
 		select {
@@ -242,7 +265,7 @@ func main() {
 			slog.Info("Scraper shutting down")
 			return
 		case <-ticker.C:
-			_ = scrapeConfigured(ctx, s, db, config, false)
+			_ = scrapeConfigured(ctx, s, db, config, &backfillState)
 		case <-retentionTicker.C:
 			_ = pruneExpiredTransactions(db, time.Now(), config.transactionRetentionDays)
 		}
@@ -258,7 +281,7 @@ func scrapeConfigured(
 	s requester,
 	db *gorm.DB,
 	config scraperConfig,
-	fullTransactionBackfill bool,
+	backfillState *transactionBackfillState,
 ) error {
 	var wg sync.WaitGroup
 	var transactionErr error
@@ -277,34 +300,61 @@ func scrapeConfigured(
 	}
 	if config.datasetEnabled(datasetTransactions) {
 		wg.Go(func() {
-			startedAt := time.Now()
-			summary, err := scrapeTransactionPages(
+			incrementalStartedAt := time.Now()
+			incrementalSummary, err := scrapeTransactionPages(
 				ctx,
 				s,
 				gormTransactionStore{db: db},
-				transactionCutoff(startedAt, config.transactionRetentionDays),
-				fullTransactionBackfill,
+				transactionCutoff(incrementalStartedAt, config.transactionRetentionDays),
+				false,
+				"",
+				0,
 			)
-			level := slog.LevelInfo
+			logTransactionScrapeSummary(
+				ctx,
+				"incremental",
+				incrementalStartedAt,
+				incrementalSummary,
+				err,
+			)
 			if err != nil {
-				level = slog.LevelError
+				transactionErr = err
+				return
+			}
+
+			if backfillState.Completed {
+				return
+			}
+
+			backfillStartedAt := time.Now()
+			backfillSummary, err := scrapeTransactionPages(
+				ctx,
+				s,
+				gormTransactionStore{db: db},
+				transactionCutoff(backfillStartedAt, config.transactionRetentionDays),
+				true,
+				backfillState.Cursor,
+				transactionBackfillPagesPerCycle,
+			)
+			logTransactionScrapeSummary(
+				ctx,
+				"backfill",
+				backfillStartedAt,
+				backfillSummary,
+				err,
+			)
+			if err != nil {
+				transactionErr = err
+				return
+			}
+
+			backfillState.Cursor = backfillSummary.NextCursor
+			backfillState.Completed = backfillSummary.BackfillComplete
+			backfillState.UpdatedAt = time.Now().UTC()
+			if err := saveTransactionBackfillState(config.stateFile, *backfillState); err != nil {
+				slog.Error("Failed to save transaction backfill state", "error", err)
 				transactionErr = err
 			}
-			slog.Log(
-				ctx,
-				level,
-				"Transaction scrape cycle complete",
-				"backfill", fullTransactionBackfill,
-				"duration_ms", time.Since(startedAt).Milliseconds(),
-				"pages", summary.Pages,
-				"received", summary.Received,
-				"new", summary.New,
-				"known", summary.Known,
-				"expired", summary.Expired,
-				"invalid", summary.Invalid,
-				"stop_reason", summary.StopReason,
-				"error", err,
-			)
 		})
 	}
 	if config.datasetEnabled(datasetArticles) {
@@ -324,14 +374,93 @@ func scrapeConfigured(
 	return transactionErr
 }
 
+func logTransactionScrapeSummary(
+	ctx context.Context,
+	mode string,
+	startedAt time.Time,
+	summary transactionScrapeSummary,
+	err error,
+) {
+	level := slog.LevelInfo
+	if err != nil {
+		level = slog.LevelError
+	}
+	slog.Log(
+		ctx,
+		level,
+		"Transaction scrape cycle complete",
+		"mode", mode,
+		"duration_ms", time.Since(startedAt).Milliseconds(),
+		"pages", summary.Pages,
+		"received", summary.Received,
+		"new", summary.New,
+		"known", summary.Known,
+		"expired", summary.Expired,
+		"invalid", summary.Invalid,
+		"stop_reason", summary.StopReason,
+		"backfill_complete", summary.BackfillComplete,
+		"error", err,
+	)
+}
+
 type transactionScrapeSummary struct {
-	Pages      int
-	Received   int
-	New        int
-	Known      int
-	Expired    int
-	Invalid    int
-	StopReason string
+	Pages            int
+	Received         int
+	New              int
+	Known            int
+	Expired          int
+	Invalid          int
+	StopReason       string
+	NextCursor       string
+	BackfillComplete bool
+}
+
+type transactionBackfillState struct {
+	Completed bool      `json:"completed"`
+	Cursor    string    `json:"cursor,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+func loadTransactionBackfillState(path string) (transactionBackfillState, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return transactionBackfillState{}, nil
+		}
+		return transactionBackfillState{}, err
+	}
+
+	var state transactionBackfillState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return transactionBackfillState{}, err
+	}
+	if state.Completed {
+		state.Cursor = ""
+	}
+	return state, nil
+}
+
+func saveTransactionBackfillState(path string, state transactionBackfillState) error {
+	if state.Completed {
+		state.Cursor = ""
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
+
+	tmp := fmt.Sprintf("%s.tmp-%d", path, os.Getpid())
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Chmod(path, 0o600)
 }
 
 type transactionPageRecord struct {
@@ -399,9 +528,11 @@ func scrapeTransactionPages(
 	store transactionStore,
 	cutoff time.Time,
 	fullBackfill bool,
+	startCursor string,
+	maxPages int,
 ) (transactionScrapeSummary, error) {
 	summary := transactionScrapeSummary{}
-	cursor := ""
+	cursor := startCursor
 	pendingIncremental := make([]transactionPageRecord, 0)
 
 	for {
@@ -490,10 +621,15 @@ func scrapeTransactionPages(
 		switch {
 		case cutoffReached:
 			summary.StopReason = "retention_cutoff"
+			summary.BackfillComplete = fullBackfill
 		case !fullBackfill && knownOverlap:
 			summary.StopReason = "known_overlap"
 		case resp.Result.Data.NextCursor == "":
 			summary.StopReason = "end_of_feed"
+			summary.BackfillComplete = fullBackfill
+		case maxPages > 0 && summary.Pages >= maxPages:
+			summary.StopReason = "page_budget"
+			summary.NextCursor = resp.Result.Data.NextCursor
 		default:
 			cursor = resp.Result.Data.NextCursor
 			continue

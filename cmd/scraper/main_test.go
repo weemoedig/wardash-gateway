@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 	"time"
 )
@@ -181,6 +182,8 @@ func TestIncrementalTransactionScrapeHealsUnknownItemsOnOverlapPage(t *testing.T
 		store,
 		now.Add(-30*24*time.Hour),
 		false,
+		"",
+		0,
 	)
 	if err != nil {
 		t.Fatalf("scrapeTransactionPages returned error: %v", err)
@@ -223,6 +226,8 @@ func TestFullTransactionBackfillIgnoresKnownOverlapUntilCutoff(t *testing.T) {
 		store,
 		cutoff,
 		true,
+		"",
+		0,
 	)
 	if err != nil {
 		t.Fatalf("scrapeTransactionPages returned error: %v", err)
@@ -238,5 +243,63 @@ func TestFullTransactionBackfillIgnoresKnownOverlapUntilCutoff(t *testing.T) {
 	}
 	if len(store.persisted) != 1 || store.persisted[0] != "new-b" {
 		t.Fatalf("persisted = %v, want [new-b]", store.persisted)
+	}
+}
+
+func TestTransactionBackfillReturnsResumeCursorAtPageBudget(t *testing.T) {
+	now := time.Date(2026, time.July, 30, 20, 0, 0, 0, time.UTC)
+	requester := &fakeRequester{responses: []json.RawMessage{
+		transactionResponse([]json.RawMessage{
+			transactionItem("new-a", now),
+		}, "page-two"),
+	}}
+	store := &fakeTransactionStore{existing: map[string]struct{}{}}
+
+	summary, err := scrapeTransactionPages(
+		context.Background(),
+		requester,
+		store,
+		now.Add(-30*24*time.Hour),
+		true,
+		"",
+		1,
+	)
+	if err != nil {
+		t.Fatalf("scrapeTransactionPages returned error: %v", err)
+	}
+	if summary.StopReason != "page_budget" {
+		t.Fatalf("stop reason = %q, want page_budget", summary.StopReason)
+	}
+	if summary.NextCursor != "page-two" {
+		t.Fatalf("next cursor = %q, want page-two", summary.NextCursor)
+	}
+	if summary.BackfillComplete {
+		t.Fatal("backfill complete = true, want false")
+	}
+}
+
+func TestTransactionBackfillStateRoundTrip(t *testing.T) {
+	path := t.TempDir() + "/nested/" + transactionStateFilename
+	want := transactionBackfillState{
+		Cursor:    "opaque-cursor",
+		UpdatedAt: time.Date(2026, time.July, 30, 20, 0, 0, 0, time.UTC),
+	}
+
+	if err := saveTransactionBackfillState(path, want); err != nil {
+		t.Fatalf("saveTransactionBackfillState returned error: %v", err)
+	}
+	got, err := loadTransactionBackfillState(path)
+	if err != nil {
+		t.Fatalf("loadTransactionBackfillState returned error: %v", err)
+	}
+	if got.Cursor != want.Cursor || !got.UpdatedAt.Equal(want.UpdatedAt) || got.Completed {
+		t.Fatalf("state = %+v, want %+v", got, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat transaction state: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("state mode = %o, want 600", got)
 	}
 }

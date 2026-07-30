@@ -23,7 +23,8 @@ static/           # Embedded HTML/CSS for the index page
 WarDash production uses `SCRAPER_DATASETS=transactions`,
 `SCRAPER_INTERVAL_SECONDS=60`, `SCRAPER_REQUESTS_PER_MINUTE=30`,
 `TRANSACTION_RETENTION_DAYS=30` and
-`GATEWAY_TRANSACTION_LOCAL_ONLY=true`. The bounded backfill repeats after a
-scraper restart so an interrupted import can repair itself; incremental cycles
-stop after processing the first page that overlaps stored transactions. See
-`env.example` for backward-compatible defaults.
+`GATEWAY_TRANSACTION_LOCAL_ONLY=true`. Incremental cycles ingest new
+transactions first; the bounded historical backfill then advances by at most 24
+pages per cycle and persists its cursor in the configured data directory.
+Restarts resume that cursor instead of restarting the import. See `env.example`
+for backward-compatible defaults.
