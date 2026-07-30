@@ -1,6 +1,7 @@
 # War Era Gateway
 
 Caching proxy and request batcher for the [War Era](https://warera.io/) API. Batches requests within a 400ms window, caches responses, and stores paginated data locally in PostgreSQL.
+
 ### Project Structure
 
 ```
@@ -17,3 +18,12 @@ internal/
 static/           # Embedded HTML/CSS for the index page
 ```
 
+### WarDash transaction runtime
+
+WarDash production uses `SCRAPER_DATASETS=transactions`,
+`SCRAPER_INTERVAL_SECONDS=60`, `SCRAPER_REQUESTS_PER_MINUTE=30`,
+`TRANSACTION_RETENTION_DAYS=30` and
+`GATEWAY_TRANSACTION_LOCAL_ONLY=true`. The bounded backfill repeats after a
+scraper restart so an interrupted import can repair itself; incremental cycles
+stop after processing the first page that overlaps stored transactions. See
+`env.example` for backward-compatible defaults.

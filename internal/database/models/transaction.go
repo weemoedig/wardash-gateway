@@ -34,6 +34,58 @@ func AddTransactionIndexes(db *gorm.DB) {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_transaction_participants_entity ON transaction_participants (entity_type, entity_id, transaction_id)`)
 }
 
+func DeleteTransactionsBefore(db *gorm.DB, cutoff time.Time) (int64, error) {
+	const batchSize = 1000
+	var total int64
+
+	for {
+		result := db.Exec(
+			`with expired as (
+			   select id
+			     from transactions
+			    where created_at < ?
+			    order by created_at
+			    limit ?
+			 )
+			 delete from transactions as transactions_to_delete
+			  using expired
+			  where transactions_to_delete.id = expired.id`,
+			cutoff.UTC(),
+			batchSize,
+		)
+		if result.Error != nil {
+			return total, result.Error
+		}
+
+		total += result.RowsAffected
+		if result.RowsAffected < batchSize {
+			return total, nil
+		}
+	}
+}
+
+func FindExistingTransactionIDs(db *gorm.DB, ids []string) (map[string]struct{}, error) {
+	existing := make(map[string]struct{})
+	if len(ids) == 0 {
+		return existing, nil
+	}
+
+	var rows []string
+	err := db.Model(&Transaction{}).
+		Where("id in ?", ids).
+		Pluck("id", &rows).
+		Error
+	if err != nil {
+		return nil, err
+	}
+
+	for _, id := range rows {
+		existing[id] = struct{}{}
+	}
+
+	return existing, nil
+}
+
 func CreateTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
 	var parsed struct {
 		ID              string    `json:"_id"`

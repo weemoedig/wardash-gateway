@@ -135,3 +135,21 @@ func TestCORSIsDisabledUnlessAllowedOriginsAreConfigured(t *testing.T) {
 		}
 	})
 }
+
+func TestTransactionLocalOnlyRequiresExplicitConfiguration(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		t.Setenv(gatewayTransactionLocalOnlyEnv, "")
+
+		if loadServiceConfig().transactionLocalOnly {
+			t.Fatal("transactionLocalOnly = true, want false")
+		}
+	})
+
+	t.Run("enabled explicitly", func(t *testing.T) {
+		t.Setenv(gatewayTransactionLocalOnlyEnv, "true")
+
+		if !loadServiceConfig().transactionLocalOnly {
+			t.Fatal("transactionLocalOnly = false, want true")
+		}
+	})
+}

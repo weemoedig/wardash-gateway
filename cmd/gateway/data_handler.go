@@ -75,6 +75,24 @@ func withFallback(
 	return dbResp, nil
 }
 
+func withOptionalFallback(
+	localOnly bool,
+	ctx context.Context,
+	stats *Stats,
+	s *scraper.Scraper,
+	db *gorm.DB,
+	method string,
+	input json.RawMessage,
+	dbQuery func() (json.RawMessage, error),
+	upsertFn func(*gorm.DB, json.RawMessage) error,
+) (json.RawMessage, error) {
+	if localOnly {
+		return dbQuery()
+	}
+
+	return withFallback(ctx, stats, s, db, method, input, dbQuery, upsertFn)
+}
+
 func withLimit100(input json.RawMessage) json.RawMessage {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(input, &m); err != nil {
@@ -97,6 +115,7 @@ func data_handler(
 	method string,
 	input json.RawMessage,
 	apiKey string,
+	transactionLocalOnly bool,
 ) (json.RawMessage, error) {
 	stats.RecordMethod(method)
 
@@ -114,7 +133,7 @@ func data_handler(
 			return handleArticles(db, input)
 		}, models.UpsertArticleFromJSON)
 	case "transaction.getPaginatedTransactions":
-		return withFallback(ctx, stats, s, db, method, input, func() (json.RawMessage, error) {
+		return withOptionalFallback(transactionLocalOnly, ctx, stats, s, db, method, input, func() (json.RawMessage, error) {
 			return handleTransactions(db, input)
 		}, models.UpsertTransactionFromJSON)
 	}

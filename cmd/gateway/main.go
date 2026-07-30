@@ -28,6 +28,7 @@ const (
 	gatewayAdminAPIKeyEnv            = "GATEWAY_ADMIN_API_KEY"
 	gatewayCORSAllowedOriginsEnv     = "GATEWAY_CORS_ALLOWED_ORIGINS"
 	gatewayEnablePublicStatsPagesEnv = "GATEWAY_ENABLE_PUBLIC_STATS"
+	gatewayTransactionLocalOnlyEnv   = "GATEWAY_TRANSACTION_LOCAL_ONLY"
 )
 
 type contextKey struct{}
@@ -196,16 +197,18 @@ func main() {
 }
 
 type serviceConfig struct {
-	adminAPIKey        string
-	corsAllowedOrigins []string
-	publicStats        bool
+	adminAPIKey          string
+	corsAllowedOrigins   []string
+	publicStats          bool
+	transactionLocalOnly bool
 }
 
 func loadServiceConfig() serviceConfig {
 	return serviceConfig{
-		adminAPIKey:        strings.TrimSpace(os.Getenv(gatewayAdminAPIKeyEnv)),
-		corsAllowedOrigins: splitCSV(os.Getenv(gatewayCORSAllowedOriginsEnv)),
-		publicStats:        parseBoolEnv(os.Getenv(gatewayEnablePublicStatsPagesEnv)),
+		adminAPIKey:          strings.TrimSpace(os.Getenv(gatewayAdminAPIKeyEnv)),
+		corsAllowedOrigins:   splitCSV(os.Getenv(gatewayCORSAllowedOriginsEnv)),
+		publicStats:          parseBoolEnv(os.Getenv(gatewayEnablePublicStatsPagesEnv)),
+		transactionLocalOnly: parseBoolEnv(os.Getenv(gatewayTransactionLocalOnlyEnv)),
 	}
 }
 
@@ -260,7 +263,7 @@ func service(db *gorm.DB, stats *Stats) http.Handler {
 	r.Use(middleware.CleanPath)
 	r.Use(middleware.Throttle(128))
 
-	trpc_handler := trpc_handler(pool, c, db, stats)
+	trpc_handler := trpc_handler(pool, c, db, stats, cfg.transactionLocalOnly)
 	r.With(apiKeyMiddleware).Method(http.MethodGet, "/trpc/*", trpc_handler)
 	r.With(apiKeyMiddleware).Method(http.MethodPost, "/trpc/*", trpc_handler)
 

@@ -14,6 +14,8 @@ const (
 	defaultUpstreamTimeout      = 10 * time.Second
 	defaultMaxResponseBytes     = 2 * 1024 * 1024
 	defaultMaxConcurrentBatches = 8
+	defaultRequestsPerMinute    = 200
+	defaultRequestBurst         = 200
 )
 
 type Scraper struct {
@@ -27,6 +29,8 @@ type Scraper struct {
 	upstreamTimeout      time.Duration
 	maxResponseBytes     int64
 	maxConcurrentBatches int
+	requestsPerMinute    int
+	requestBurst         int
 }
 
 type Option func(*Scraper)
@@ -80,6 +84,13 @@ func WithMaxConcurrentBatches(maxConcurrent int) Option {
 	}
 }
 
+func WithRequestRateLimit(requestsPerMinute, burst int) Option {
+	return func(s *Scraper) {
+		s.requestsPerMinute = requestsPerMinute
+		s.requestBurst = burst
+	}
+}
+
 func (s *Scraper) Close() {
 	s.gb.Close()
 }
@@ -89,10 +100,11 @@ func NewScraper(opts ...Option) *Scraper {
 		client:               http.Client{Timeout: defaultUpstreamTimeout},
 		baseURL:              defaultBaseURL,
 		apiKey:               os.Getenv("WARERA_API_KEY"),
-		limiter:              rate.NewLimiter(rate.Every(time.Minute/200), 200),
 		upstreamTimeout:      defaultUpstreamTimeout,
 		maxResponseBytes:     defaultMaxResponseBytes,
 		maxConcurrentBatches: defaultMaxConcurrentBatches,
+		requestsPerMinute:    defaultRequestsPerMinute,
+		requestBurst:         defaultRequestBurst,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -109,6 +121,16 @@ func NewScraper(opts ...Option) *Scraper {
 	if s.maxConcurrentBatches <= 0 {
 		s.maxConcurrentBatches = defaultMaxConcurrentBatches
 	}
+	if s.requestsPerMinute <= 0 {
+		s.requestsPerMinute = defaultRequestsPerMinute
+	}
+	if s.requestBurst <= 0 {
+		s.requestBurst = defaultRequestBurst
+	}
+	s.limiter = rate.NewLimiter(
+		rate.Every(time.Minute/time.Duration(s.requestsPerMinute)),
+		s.requestBurst,
+	)
 	s.gb = newGlobalBatcher(s)
 	return s
 }
