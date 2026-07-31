@@ -28,3 +28,24 @@ transactions first; the bounded historical backfill then advances by at most 24
 pages per cycle and persists its cursor in the configured data directory.
 Restarts resume that cursor instead of restarting the import. See `env.example`
 for backward-compatible defaults.
+
+### WarDash market rollups
+
+The transaction scraper maintains `market_daily_rollups` for the
+`trading` and `itemMarket` transaction types. Transaction inserts and their
+rollup increments commit atomically, while reconciliation at startup, daily,
+whenever the reliable upper calendar window advances, and after each
+successful backfill advance rebuilds the proven retained calendar window from
+the transaction store. Calendar days use `Europe/Brussels`.
+
+WarDash workers can read at most 30 reliable days through:
+
+```text
+GET /api/market/daily?days=30
+X-Gateway-Market-Key: <GATEWAY_MARKET_READ_API_KEY>
+```
+
+The gateway and scraper must share `DATA_DIR` so the endpoint can read the
+backfill coverage recorded in `transaction-scraper-state.json`. Decimal totals
+remain JSON strings. The endpoint is disabled with a `404` when the dedicated
+market read key is not configured.

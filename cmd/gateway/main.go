@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Hattorius/War-Era-Gateway/internal/database"
+	"github.com/Hattorius/War-Era-Gateway/internal/market"
 	"github.com/Hattorius/War-Era-Gateway/internal/scraper"
 	"github.com/Hattorius/War-Era-Gateway/static"
 	"github.com/go-chi/chi/v5"
@@ -29,6 +30,7 @@ const (
 	gatewayCORSAllowedOriginsEnv     = "GATEWAY_CORS_ALLOWED_ORIGINS"
 	gatewayEnablePublicStatsPagesEnv = "GATEWAY_ENABLE_PUBLIC_STATS"
 	gatewayTransactionLocalOnlyEnv   = "GATEWAY_TRANSACTION_LOCAL_ONLY"
+	gatewayMarketReadAPIKeyEnv       = "GATEWAY_MARKET_READ_API_KEY"
 )
 
 type contextKey struct{}
@@ -72,6 +74,29 @@ func adminKeyMiddleware(adminKey string) func(http.Handler) http.Handler {
 			key, ok := apiKeyFromHeader(r, "X-Gateway-Admin-Key")
 			if !ok || subtle.ConstantTimeCompare([]byte(key), []byte(adminKey)) != 1 {
 				http.Error(w, "missing or invalid X-Gateway-Admin-Key header", http.StatusUnauthorized)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func marketReadKeyMiddleware(marketReadKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if marketReadKey == "" {
+				http.NotFound(w, r)
+				return
+			}
+
+			key, ok := apiKeyFromHeader(r, "X-Gateway-Market-Key")
+			if !ok || subtle.ConstantTimeCompare([]byte(key), []byte(marketReadKey)) != 1 {
+				http.Error(
+					w,
+					"missing or invalid X-Gateway-Market-Key header",
+					http.StatusUnauthorized,
+				)
 				return
 			}
 
@@ -145,10 +170,7 @@ func main() {
 		addr = "0.0.0.0:8080"
 	}
 
-	dataDir := os.Getenv("DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
-	}
+	dataDir := getDataDir()
 
 	db, err := database.Connect()
 	if err != nil {
@@ -198,18 +220,30 @@ func main() {
 
 type serviceConfig struct {
 	adminAPIKey          string
+	marketReadAPIKey     string
 	corsAllowedOrigins   []string
 	publicStats          bool
 	transactionLocalOnly bool
+	transactionStateFile string
 }
 
 func loadServiceConfig() serviceConfig {
 	return serviceConfig{
 		adminAPIKey:          strings.TrimSpace(os.Getenv(gatewayAdminAPIKeyEnv)),
+		marketReadAPIKey:     strings.TrimSpace(os.Getenv(gatewayMarketReadAPIKeyEnv)),
 		corsAllowedOrigins:   splitCSV(os.Getenv(gatewayCORSAllowedOriginsEnv)),
 		publicStats:          parseBoolEnv(os.Getenv(gatewayEnablePublicStatsPagesEnv)),
 		transactionLocalOnly: parseBoolEnv(os.Getenv(gatewayTransactionLocalOnlyEnv)),
+		transactionStateFile: market.StateFile(getDataDir()),
 	}
+}
+
+func getDataDir() string {
+	dataDir := strings.TrimSpace(os.Getenv("DATA_DIR"))
+	if dataDir == "" {
+		return "./data"
+	}
+	return dataDir
 }
 
 func splitCSV(raw string) []string {
@@ -272,6 +306,14 @@ func service(db *gorm.DB, stats *Stats) http.Handler {
 	} else {
 		r.With(adminKeyMiddleware(cfg.adminAPIKey)).Get("/api/stats", stats.HTTPHandler())
 	}
+	r.With(marketReadKeyMiddleware(cfg.marketReadAPIKey)).Get(
+		"/api/market/daily",
+		marketDailyHandler(
+			gormMarketDailySource{db: db},
+			cfg.transactionStateFile,
+			time.Now,
+		),
+	)
 
 	if cfg.publicStats {
 		staticSub, _ := fs.Sub(static.Files, ".")

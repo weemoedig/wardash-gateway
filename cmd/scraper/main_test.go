@@ -42,12 +42,17 @@ func (f *fakeTransactionStore) findExistingIDs(ids []string) (map[string]struct{
 	return found, nil
 }
 
-func (f *fakeTransactionStore) persist(records []transactionPageRecord) error {
+func (f *fakeTransactionStore) persist(records []transactionPageRecord) (int, error) {
+	inserted := 0
 	for _, record := range records {
+		if _, exists := f.existing[record.id]; exists {
+			continue
+		}
 		f.persisted = append(f.persisted, record.id)
 		f.existing[record.id] = struct{}{}
+		inserted++
 	}
-	return nil
+	return inserted, nil
 }
 
 func transactionItem(id string, createdAt time.Time) json.RawMessage {
@@ -159,6 +164,15 @@ func TestTransactionCutoffUsesRollingUTCDays(t *testing.T) {
 
 	if !got.Equal(want) {
 		t.Fatalf("cutoff = %s, want %s", got, want)
+	}
+}
+
+func TestMarketRollupRetentionNeverExceedsPublicContract(t *testing.T) {
+	if got := marketRollupRetentionDays(365); got != 30 {
+		t.Fatalf("365-day transaction retention produced %d market days, want 30", got)
+	}
+	if got := marketRollupRetentionDays(7); got != 7 {
+		t.Fatalf("7-day transaction retention produced %d market days, want 7", got)
 	}
 }
 
@@ -278,11 +292,174 @@ func TestTransactionBackfillReturnsResumeCursorAtPageBudget(t *testing.T) {
 	}
 }
 
+func TestTransactionBackfillFrontierUsesCursorBoundaryNotLooseExpiredMinimum(
+	t *testing.T,
+) {
+	cutoff := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	boundary := time.Date(2026, time.July, 30, 7, 0, 0, 0, time.UTC)
+	requester := &fakeRequester{responses: []json.RawMessage{
+		transactionResponse([]json.RawMessage{
+			transactionItem(
+				"new-a",
+				time.Date(2026, time.July, 30, 10, 0, 0, 0, time.UTC),
+			),
+			transactionItem(
+				"new-b",
+				time.Date(2026, time.July, 30, 9, 0, 0, 0, time.UTC),
+			),
+			transactionItem(
+				"loose-expired",
+				time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
+			),
+			transactionItem(
+				"new-c",
+				time.Date(2026, time.July, 30, 8, 0, 0, 0, time.UTC),
+			),
+			transactionItem("new-d", boundary),
+			transactionItem(
+				"",
+				time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC),
+			),
+		}, "page-two"),
+	}}
+	store := &fakeTransactionStore{existing: map[string]struct{}{}}
+
+	summary, err := scrapeTransactionPages(
+		context.Background(),
+		requester,
+		store,
+		cutoff,
+		true,
+		"",
+		1,
+	)
+	if err != nil {
+		t.Fatalf("scrapeTransactionPages returned error: %v", err)
+	}
+	if summary.StopReason != "page_budget" ||
+		summary.BackfillComplete ||
+		summary.Expired != 1 ||
+		summary.Invalid != 1 ||
+		summary.OldestProcessedAt == nil ||
+		!summary.OldestProcessedAt.Equal(boundary) {
+		t.Fatalf(
+			"summary = %+v, want cursor boundary %s without false cutoff completion",
+			summary,
+			boundary,
+		)
+	}
+	if len(store.persisted) != 4 {
+		t.Fatalf("persisted = %v, want four retained valid transactions", store.persisted)
+	}
+}
+
+func TestTransactionScrapeFailsClosedWithoutValidCursorBoundary(t *testing.T) {
+	requester := &fakeRequester{responses: []json.RawMessage{
+		transactionResponse([]json.RawMessage{
+			transactionItem(
+				"",
+				time.Date(2026, time.July, 30, 8, 0, 0, 0, time.UTC),
+			),
+			json.RawMessage(`{"_id":"missing-created-at"}`),
+		}, "page-two"),
+	}}
+	store := &fakeTransactionStore{existing: map[string]struct{}{}}
+
+	summary, err := scrapeTransactionPages(
+		context.Background(),
+		requester,
+		store,
+		time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
+		true,
+		"",
+		1,
+	)
+	if err == nil {
+		t.Fatal("scrapeTransactionPages returned nil, want invalid boundary error")
+	}
+	if summary.StopReason != "invalid_cursor_boundary" ||
+		summary.BackfillComplete ||
+		summary.OldestProcessedAt != nil {
+		t.Fatalf("summary = %+v, want fail-closed invalid boundary", summary)
+	}
+}
+
+func TestTransactionScrapeRejectsEmptyPageWithContinuationCursor(t *testing.T) {
+	requester := &fakeRequester{responses: []json.RawMessage{
+		transactionResponse([]json.RawMessage{}, "unexpected-next-page"),
+	}}
+	store := &fakeTransactionStore{existing: map[string]struct{}{}}
+
+	summary, err := scrapeTransactionPages(
+		context.Background(),
+		requester,
+		store,
+		time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
+		true,
+		"",
+		1,
+	)
+	if err == nil {
+		t.Fatal("scrapeTransactionPages returned nil, want cursor-boundary error")
+	}
+	if summary.StopReason != "invalid_cursor_boundary" ||
+		summary.BackfillComplete {
+		t.Fatalf("summary = %+v, want fail-closed empty cursor page", summary)
+	}
+}
+
+func TestTransactionBackfillTreatsEmptyPageAsComplete(t *testing.T) {
+	requester := &fakeRequester{responses: []json.RawMessage{
+		transactionResponse([]json.RawMessage{}, ""),
+	}}
+	store := &fakeTransactionStore{existing: map[string]struct{}{}}
+
+	summary, err := scrapeTransactionPages(
+		context.Background(),
+		requester,
+		store,
+		time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
+		true,
+		"",
+		0,
+	)
+	if err != nil {
+		t.Fatalf("scrapeTransactionPages returned error: %v", err)
+	}
+	if summary.StopReason != "empty_page" || !summary.BackfillComplete {
+		t.Fatalf("summary = %+v, want completed empty-page backfill", summary)
+	}
+}
+
 func TestTransactionBackfillStateRoundTrip(t *testing.T) {
 	path := t.TempDir() + "/nested/" + transactionStateFilename
+	oldestProcessedAt := time.Date(
+		2026,
+		time.July,
+		1,
+		12,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+	coveredThrough := time.Date(
+		2026,
+		time.July,
+		30,
+		19,
+		59,
+		0,
+		0,
+		time.UTC,
+	)
 	want := transactionBackfillState{
-		Cursor:    "opaque-cursor",
-		UpdatedAt: time.Date(2026, time.July, 30, 20, 0, 0, 0, time.UTC),
+		Cursor:                    "opaque-cursor",
+		UpdatedAt:                 time.Date(2026, time.July, 30, 20, 0, 0, 0, time.UTC),
+		AvailableSince:            "2026-07-02",
+		CompletionReason:          "",
+		BackfillOldestProcessedAt: &oldestProcessedAt,
+		IncrementalCoveredThrough: &coveredThrough,
 	}
 
 	if err := saveTransactionBackfillState(path, want); err != nil {
@@ -292,7 +469,15 @@ func TestTransactionBackfillStateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadTransactionBackfillState returned error: %v", err)
 	}
-	if got.Cursor != want.Cursor || !got.UpdatedAt.Equal(want.UpdatedAt) || got.Completed {
+	if got.Cursor != want.Cursor ||
+		!got.UpdatedAt.Equal(want.UpdatedAt) ||
+		got.AvailableSince != want.AvailableSince ||
+		got.CompletionReason != want.CompletionReason ||
+		got.BackfillOldestProcessedAt == nil ||
+		!got.BackfillOldestProcessedAt.Equal(oldestProcessedAt) ||
+		got.IncrementalCoveredThrough == nil ||
+		!got.IncrementalCoveredThrough.Equal(coveredThrough) ||
+		got.Completed {
 		t.Fatalf("state = %+v, want %+v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -301,5 +486,250 @@ func TestTransactionBackfillStateRoundTrip(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("state mode = %o, want 600", got)
+	}
+}
+
+func TestMarketAvailabilityUsesExplicitBackfillFrontier(t *testing.T) {
+	now := time.Date(2026, time.March, 30, 12, 0, 0, 0, time.UTC)
+	frontier := time.Date(2026, time.March, 28, 23, 30, 0, 0, time.UTC)
+	state := transactionBackfillState{
+		BackfillOldestProcessedAt: &frontier,
+	}
+
+	if err := refreshMarketAvailabilityFromFrontier(
+		&state,
+		now,
+		30,
+	); err != nil {
+		t.Fatalf("refreshMarketAvailabilityFromFrontier returned error: %v", err)
+	}
+	if state.AvailableSince != "2026-03-30" {
+		t.Fatalf("availableSince = %s, want 2026-03-30", state.AvailableSince)
+	}
+}
+
+func TestMarketAvailabilityIncludesConfirmedFeedStartDay(t *testing.T) {
+	frontier := time.Date(2026, time.October, 24, 22, 30, 0, 0, time.UTC)
+	state := transactionBackfillState{
+		Completed:                 true,
+		CompletionReason:          "end_of_feed",
+		BackfillOldestProcessedAt: &frontier,
+	}
+
+	if err := refreshMarketAvailabilityFromFrontier(
+		&state,
+		time.Date(2026, time.October, 25, 12, 0, 0, 0, time.UTC),
+		30,
+	); err != nil {
+		t.Fatalf("refreshMarketAvailabilityFromFrontier returned error: %v", err)
+	}
+	if state.AvailableSince != "2026-10-25" {
+		t.Fatalf("availableSince = %s, want 2026-10-25", state.AvailableSince)
+	}
+}
+
+func TestMarketAvailabilityIsClampedToRetainedCalendarWindow(t *testing.T) {
+	frontier := time.Date(2026, time.May, 1, 12, 0, 0, 0, time.UTC)
+	state := transactionBackfillState{
+		Completed:                 true,
+		CompletionReason:          "end_of_feed",
+		BackfillOldestProcessedAt: &frontier,
+	}
+	if err := refreshMarketAvailabilityFromFrontier(
+		&state,
+		time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC),
+		30,
+	); err != nil {
+		t.Fatalf("refreshMarketAvailabilityFromFrontier returned error: %v", err)
+	}
+	if state.AvailableSince != "2026-07-01" {
+		t.Fatalf("availableSince = %s, want 2026-07-01", state.AvailableSince)
+	}
+}
+
+func TestMarketAvailabilityDoesNotPublishFutureCoverage(t *testing.T) {
+	frontier := time.Date(2026, time.July, 30, 10, 0, 0, 0, time.UTC)
+	state := transactionBackfillState{
+		BackfillOldestProcessedAt: &frontier,
+	}
+
+	if err := refreshMarketAvailabilityFromFrontier(
+		&state,
+		time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC),
+		30,
+	); err != nil {
+		t.Fatalf("refreshMarketAvailabilityFromFrontier returned error: %v", err)
+	}
+	if state.AvailableSince != "" {
+		t.Fatalf("availableSince = %s, want empty until a full day is reliable", state.AvailableSince)
+	}
+}
+
+func TestLegacyCoverageMigrationIsConservative(t *testing.T) {
+	now := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
+
+	t.Run("incomplete cursor does not trust old database minimum", func(t *testing.T) {
+		state := transactionBackfillState{
+			Cursor:         "legacy-cursor",
+			UpdatedAt:      now.Add(-time.Hour),
+			AvailableSince: "2026-01-01",
+		}
+
+		if err := prepareMarketCoverageState(&state, now, 30); err != nil {
+			t.Fatalf("prepareMarketCoverageState returned error: %v", err)
+		}
+		if state.AvailableSince != "" ||
+			state.BackfillOldestProcessedAt != nil {
+			t.Fatalf("legacy incomplete state = %+v, want no claimed lower coverage", state)
+		}
+	})
+
+	t.Run("completed state gets explicit conservative frontier", func(t *testing.T) {
+		state := transactionBackfillState{
+			Completed:        true,
+			CompletionReason: "end_of_feed",
+			UpdatedAt:        now,
+		}
+
+		if err := prepareMarketCoverageState(&state, now, 30); err != nil {
+			t.Fatalf("prepareMarketCoverageState returned error: %v", err)
+		}
+		if state.BackfillOldestProcessedAt == nil ||
+			state.CompletionReason != "legacy_complete" ||
+			state.AvailableSince != "2026-07-01" {
+			t.Fatalf("migrated legacy state = %+v, want conservative July coverage", state)
+		}
+	})
+}
+
+func TestIncrementalCoverageUpdatesEvenAfterBackfillCompletion(t *testing.T) {
+	previous := time.Date(2026, time.July, 30, 10, 0, 0, 0, time.UTC)
+	coveredThrough := previous.Add(5 * time.Minute)
+	state := transactionBackfillState{
+		Completed:                 true,
+		IncrementalCoveredThrough: &previous,
+	}
+
+	if err := recordIncrementalCoverage(
+		&state,
+		coveredThrough,
+		coveredThrough.Add(time.Second),
+		30,
+	); err != nil {
+		t.Fatalf("recordIncrementalCoverage returned error: %v", err)
+	}
+	if state.IncrementalCoveredThrough == nil ||
+		!state.IncrementalCoveredThrough.Equal(coveredThrough) {
+		t.Fatalf("coveredThrough = %v, want %s",
+			state.IncrementalCoveredThrough,
+			coveredThrough,
+		)
+	}
+}
+
+func TestMarketReliableCoverageAdvanced(t *testing.T) {
+	now := time.Date(2026, time.July, 30, 22, 30, 0, 0, time.UTC)
+	current := now.Add(-time.Minute)
+	previousSameDay := current.Add(-5 * time.Minute)
+	previousBeforeMidnight := time.Date(
+		2026,
+		time.July,
+		30,
+		21,
+		50,
+		0,
+		0,
+		time.UTC,
+	)
+
+	tests := []struct {
+		name     string
+		previous *time.Time
+		want     bool
+	}{
+		{
+			name: "first proven upper coverage",
+			want: true,
+		},
+		{
+			name:     "same Brussels day",
+			previous: &previousSameDay,
+			want:     false,
+		},
+		{
+			name:     "crossed Brussels midnight",
+			previous: &previousBeforeMidnight,
+			want:     true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := marketReliableCoverageAdvanced(
+				test.previous,
+				&current,
+				now,
+			)
+			if err != nil {
+				t.Fatalf("marketReliableCoverageAdvanced returned error: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("coverage advanced = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestFailedFirstIncrementalDoesNotClaimCoverage(t *testing.T) {
+	tests := []struct {
+		name      string
+		responses []json.RawMessage
+	}{
+		{
+			name: "transport failure",
+		},
+		{
+			name:      "missing response envelope",
+			responses: []json.RawMessage{json.RawMessage(`{}`)},
+		},
+		{
+			name: "application error envelope",
+			responses: []json.RawMessage{
+				json.RawMessage(`{"error":{"message":"upstream failed"}}`),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stateFile := t.TempDir() + "/" + transactionStateFilename
+			state := transactionBackfillState{}
+			config := scraperConfig{
+				datasets: map[scraperDataset]struct{}{
+					datasetTransactions: {},
+				},
+				stateFile:                stateFile,
+				transactionRetentionDays: 30,
+			}
+
+			err := scrapeConfigured(
+				context.Background(),
+				&fakeRequester{responses: test.responses},
+				nil,
+				config,
+				&state,
+			)
+			if err == nil {
+				t.Fatal("scrapeConfigured returned nil, want first incremental failure")
+			}
+			if state.IncrementalCoveredThrough != nil {
+				t.Fatalf("coveredThrough = %v, want nil after failed incremental",
+					state.IncrementalCoveredThrough,
+				)
+			}
+			if _, statErr := os.Stat(stateFile); !os.IsNotExist(statErr) {
+				t.Fatalf("state file stat error = %v, want not-exist", statErr)
+			}
+		})
 	}
 }

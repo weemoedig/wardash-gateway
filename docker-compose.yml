@@ -33,6 +33,7 @@ services:
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
       DATA_DIR: /app/data
+      GATEWAY_MARKET_READ_API_KEY: ${GATEWAY_MARKET_READ_API_KEY:-}
     volumes:
       - ./data:/app/data
     networks:
@@ -56,6 +57,9 @@ services:
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
       WARERA_API_KEY: ${WARERA_API_KEY}
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
     networks:
       - war
     logging:

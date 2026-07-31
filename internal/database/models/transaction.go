@@ -3,10 +3,12 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Transaction struct {
@@ -86,26 +88,38 @@ func FindExistingTransactionIDs(db *gorm.DB, ids []string) (map[string]struct{},
 	return existing, nil
 }
 
-func CreateTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
-	var parsed struct {
-		ID              string    `json:"_id"`
-		TransactionType string    `json:"transactionType"`
-		ItemCode        string    `json:"itemCode"`
-		SellerID        string    `json:"sellerId"`
-		BuyerID         string    `json:"buyerId"`
-		SellerCountryID string    `json:"sellerCountryId"`
-		BuyerCountryID  string    `json:"buyerCountryId"`
-		SellerMuID      string    `json:"sellerMuId"`
-		BuyerMuID       string    `json:"buyerMuId"`
-		SellerPartyID   string    `json:"sellerPartyId"`
-		BuyerPartyID    string    `json:"buyerPartyId"`
-		CreatedAt       time.Time `json:"createdAt"`
-		UpdatedAt       time.Time `json:"updatedAt"`
-	}
+type parsedTransactionJSON struct {
+	ID              string    `json:"_id"`
+	TransactionType string    `json:"transactionType"`
+	ItemCode        string    `json:"itemCode"`
+	SellerID        string    `json:"sellerId"`
+	BuyerID         string    `json:"buyerId"`
+	SellerCountryID string    `json:"sellerCountryId"`
+	BuyerCountryID  string    `json:"buyerCountryId"`
+	SellerMuID      string    `json:"sellerMuId"`
+	BuyerMuID       string    `json:"buyerMuId"`
+	SellerPartyID   string    `json:"sellerPartyId"`
+	BuyerPartyID    string    `json:"buyerPartyId"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
 
-	err := json.Unmarshal(raw, &parsed)
-	if err != nil {
-		return fmt.Errorf("failed to parse transaction JSON: %w", err)
+func parseTransactionJSON(
+	raw json.RawMessage,
+) (Transaction, []TransactionParticipant, *MarketContribution, error) {
+	var parsed parsedTransactionJSON
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return Transaction{}, nil, nil, fmt.Errorf("failed to parse transaction JSON: %w", err)
+	}
+	parsed.ID = strings.TrimSpace(parsed.ID)
+	if parsed.ID == "" {
+		return Transaction{}, nil, nil, fmt.Errorf("failed to parse transaction JSON: missing _id")
+	}
+	if parsed.CreatedAt.IsZero() {
+		return Transaction{}, nil, nil, fmt.Errorf(
+			"failed to parse transaction JSON %s: missing createdAt",
+			parsed.ID,
+		)
 	}
 
 	var participants []TransactionParticipant
@@ -129,6 +143,10 @@ func CreateTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
 	add(parsed.SellerPartyID, "party", "seller")
 	add(parsed.BuyerPartyID, "party", "buyer")
 
+	contribution, err := MarketContributionFromJSON(raw)
+	if err != nil {
+		return Transaction{}, nil, nil, err
+	}
 	txn := Transaction{
 		ID:              parsed.ID,
 		TransactionType: parsed.TransactionType,
@@ -136,76 +154,91 @@ func CreateTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
 		Data:            datatypes.JSON(raw),
 		CreatedAt:       parsed.CreatedAt.Truncate(time.Second),
 		UpdatedAt:       parsed.UpdatedAt.Truncate(time.Second),
-		Participants:    participants,
 	}
-
-	return db.Create(&txn).Error
+	return txn, participants, contribution, nil
 }
 
-func UpsertTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
-	var parsed struct {
-		ID              string    `json:"_id"`
-		TransactionType string    `json:"transactionType"`
-		ItemCode        string    `json:"itemCode"`
-		SellerID        string    `json:"sellerId"`
-		BuyerID         string    `json:"buyerId"`
-		SellerCountryID string    `json:"sellerCountryId"`
-		BuyerCountryID  string    `json:"buyerCountryId"`
-		SellerMuID      string    `json:"sellerMuId"`
-		BuyerMuID       string    `json:"buyerMuId"`
-		SellerPartyID   string    `json:"sellerPartyId"`
-		BuyerPartyID    string    `json:"buyerPartyId"`
-		CreatedAt       time.Time `json:"createdAt"`
-		UpdatedAt       time.Time `json:"updatedAt"`
-	}
-
-	err := json.Unmarshal(raw, &parsed)
+func insertTransactionFromJSON(
+	db *gorm.DB,
+	raw json.RawMessage,
+	updateExisting bool,
+) (bool, error) {
+	txn, participants, contribution, err := parseTransactionJSON(raw)
 	if err != nil {
-		return fmt.Errorf("failed to parse transaction JSON: %w", err)
+		return false, err
 	}
 
-	var participants []TransactionParticipant
-	add := func(entityID, entityType, role string) {
-		if entityID != "" {
-			participants = append(participants, TransactionParticipant{
-				TransactionID: parsed.ID,
-				EntityID:      entityID,
-				EntityType:    entityType,
-				Role:          role,
-			})
-		}
-	}
-
-	add(parsed.SellerID, "user", "seller")
-	add(parsed.BuyerID, "user", "buyer")
-	add(parsed.SellerCountryID, "country", "seller")
-	add(parsed.BuyerCountryID, "country", "buyer")
-	add(parsed.SellerMuID, "mu", "seller")
-	add(parsed.BuyerMuID, "mu", "buyer")
-	add(parsed.SellerPartyID, "party", "seller")
-	add(parsed.BuyerPartyID, "party", "buyer")
-
-	return db.Transaction(func(tx *gorm.DB) error {
-		txn := Transaction{
-			ID:              parsed.ID,
-			TransactionType: parsed.TransactionType,
-			ItemCode:        parsed.ItemCode,
-			Data:            datatypes.JSON(raw),
-			CreatedAt:       parsed.CreatedAt.Truncate(time.Second),
-			UpdatedAt:       parsed.UpdatedAt.Truncate(time.Second),
+	inserted := false
+	err = db.Transaction(func(tx *gorm.DB) error {
+		result := tx.
+			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "id"}},
+				DoNothing: true,
+			}).
+			Omit(clause.Associations).
+			Create(&txn)
+		if result.Error != nil {
+			return result.Error
 		}
 
-		err := tx.Save(&txn).Error
-		if err != nil {
+		if result.RowsAffected == 1 {
+			inserted = true
+			if len(participants) > 0 {
+				if err := tx.Create(&participants).Error; err != nil {
+					return err
+				}
+			}
+			if contribution != nil {
+				if err := IncrementMarketDailyRollup(tx, txn.CreatedAt, *contribution); err != nil {
+					return fmt.Errorf("increment market rollup for transaction %s: %w", txn.ID, err)
+				}
+			}
+			return nil
+		}
+
+		if !updateExisting {
+			return nil
+		}
+		if err := tx.Model(&Transaction{}).
+			Where("id = ?", txn.ID).
+			Updates(map[string]any{
+				"transaction_type": txn.TransactionType,
+				"item_code":        txn.ItemCode,
+				"data":             txn.Data,
+				"created_at":       txn.CreatedAt,
+				"updated_at":       txn.UpdatedAt,
+			}).
+			Error; err != nil {
 			return err
 		}
-
+		if err := tx.Where("transaction_id = ?", txn.ID).
+			Delete(&TransactionParticipant{}).
+			Error; err != nil {
+			return err
+		}
 		if len(participants) > 0 {
-			tx.Where("transaction_id = ?", parsed.ID).Delete(&TransactionParticipant{})
 			return tx.Create(&participants).Error
 		}
 		return nil
 	})
+	if err != nil {
+		return false, err
+	}
+	return inserted, nil
+}
+
+func InsertTransactionFromJSON(db *gorm.DB, raw json.RawMessage) (bool, error) {
+	return insertTransactionFromJSON(db, raw, false)
+}
+
+func CreateTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
+	_, err := InsertTransactionFromJSON(db, raw)
+	return err
+}
+
+func UpsertTransactionFromJSON(db *gorm.DB, raw json.RawMessage) error {
+	_, err := insertTransactionFromJSON(db, raw, true)
+	return err
 }
 
 type TransactionQuery struct {

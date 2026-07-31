@@ -26,6 +26,7 @@ func Connect() (*gorm.DB, error) {
 		&models.WorkOffer{},
 		&models.Article{},
 		&models.Transaction{}, &models.TransactionParticipant{},
+		&models.MarketDailyRollup{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)

@@ -153,3 +153,71 @@ func TestTransactionLocalOnlyRequiresExplicitConfiguration(t *testing.T) {
 		}
 	})
 }
+
+func TestMarketDailyRouteRequiresDedicatedReadKey(t *testing.T) {
+	t.Setenv(gatewayAdminAPIKeyEnv, "admin-secret")
+	t.Setenv(gatewayMarketReadAPIKeyEnv, "market-secret")
+	t.Setenv(gatewayCORSAllowedOriginsEnv, "")
+	t.Setenv(gatewayEnablePublicStatsPagesEnv, "")
+	t.Setenv("DATA_DIR", t.TempDir())
+
+	handler := service(nil, NewStats(t.TempDir()+"/stats.json", allowedMethods))
+
+	tests := []struct {
+		name    string
+		headers map[string]string
+		status  int
+	}{
+		{
+			name:   "missing key",
+			status: http.StatusUnauthorized,
+		},
+		{
+			name: "admin key is not accepted",
+			headers: map[string]string{
+				"X-Gateway-Admin-Key": "admin-secret",
+			},
+			status: http.StatusUnauthorized,
+		},
+		{
+			name: "generic upstream key is not accepted",
+			headers: map[string]string{
+				"X-API-Key": "market-secret",
+			},
+			status: http.StatusUnauthorized,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/market/daily?days=30", nil)
+			for name, value := range test.headers {
+				req.Header.Set(name, value)
+			}
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != test.status {
+				t.Fatalf("status = %d, want %d", rec.Code, test.status)
+			}
+		})
+	}
+}
+
+func TestMarketDailyRouteIsHiddenWithoutConfiguredReadKey(t *testing.T) {
+	t.Setenv(gatewayMarketReadAPIKeyEnv, "")
+	t.Setenv(gatewayCORSAllowedOriginsEnv, "")
+	t.Setenv(gatewayEnablePublicStatsPagesEnv, "")
+	t.Setenv("DATA_DIR", t.TempDir())
+
+	handler := service(nil, NewStats(t.TempDir()+"/stats.json", allowedMethods))
+	req := httptest.NewRequest(http.MethodGet, "/api/market/daily?days=30", nil)
+	req.Header.Set("X-Gateway-Market-Key", "anything")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
