@@ -34,6 +34,8 @@ services:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
       DATA_DIR: /app/data
       GATEWAY_MARKET_READ_API_KEY: ${GATEWAY_MARKET_READ_API_KEY:-}
+      GATEWAY_TRANSACTION_READ_API_KEY: ${GATEWAY_TRANSACTION_READ_API_KEY:-}
+      GATEWAY_TRANSACTION_LOCAL_ONLY: ${GATEWAY_TRANSACTION_LOCAL_ONLY:-true}
     volumes:
       - ./data:/app/data
     networks:

@@ -92,11 +92,36 @@ func trpc_handler(
 		stats.RecordRequest()
 
 		ctx := r.Context()
-		apiKey := apiKeyFromContext(ctx)
-		s, err := pool.Get(apiKey)
-		if err != nil {
-			http.Error(w, "gateway request pool is unavailable", http.StatusServiceUnavailable)
+		credential := trpcCredentialFromContext(ctx)
+		containsTransaction := false
+		for _, request := range requests {
+			if request.Method == "transaction.getPaginatedTransactions" {
+				containsTransaction = true
+			}
+		}
+
+		if credential.kind == trpcCredentialTransaction {
+			if !transactionLocalOnly || len(requests) != 1 || !containsTransaction {
+				http.Error(w, "transaction credential is restricted to local transaction reads", http.StatusForbidden)
+				return
+			}
+		} else if containsTransaction {
+			http.Error(w, "transaction reads require the dedicated Gateway credential", http.StatusForbidden)
 			return
+		}
+
+		var s *scraper.Scraper
+		apiKey := credential.upstreamKey
+		if credential.kind == trpcCredentialUpstream {
+			if pool == nil {
+				http.Error(w, "gateway request pool is unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			s, err = pool.Get(apiKey)
+			if err != nil {
+				http.Error(w, "gateway request pool is unavailable", http.StatusServiceUnavailable)
+				return
+			}
 		}
 		responses := make([]json.RawMessage, len(requests))
 		for i, request := range requests {
@@ -109,7 +134,7 @@ func trpc_handler(
 				request.Method,
 				request.Input,
 				apiKey,
-				transactionLocalOnly,
+				credential.kind == trpcCredentialTransaction,
 			)
 			if err != nil {
 				slog.Error("Received error from War Era API!", "error", err, "method", request.Method)

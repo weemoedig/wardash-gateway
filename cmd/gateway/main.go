@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"io/fs"
@@ -30,17 +31,34 @@ const (
 	gatewayCORSAllowedOriginsEnv     = "GATEWAY_CORS_ALLOWED_ORIGINS"
 	gatewayEnablePublicStatsPagesEnv = "GATEWAY_ENABLE_PUBLIC_STATS"
 	gatewayTransactionLocalOnlyEnv   = "GATEWAY_TRANSACTION_LOCAL_ONLY"
+	gatewayTransactionReadAPIKeyEnv  = "GATEWAY_TRANSACTION_READ_API_KEY"
 	gatewayMarketReadAPIKeyEnv       = "GATEWAY_MARKET_READ_API_KEY"
 )
 
 type contextKey struct{}
 
-func apiKeyFromContext(ctx context.Context) string {
-	v, ok := ctx.Value(contextKey{}).(string)
+type trpcCredentialKind string
+
+const (
+	trpcCredentialUpstream    trpcCredentialKind = "upstream"
+	trpcCredentialTransaction trpcCredentialKind = "transaction"
+)
+
+type trpcCredential struct {
+	kind        trpcCredentialKind
+	upstreamKey string
+}
+
+func trpcCredentialFromContext(ctx context.Context) trpcCredential {
+	v, ok := ctx.Value(contextKey{}).(trpcCredential)
 	if ok {
 		return v
 	}
-	return ""
+	return trpcCredential{}
+}
+
+func apiKeyFromContext(ctx context.Context) string {
+	return trpcCredentialFromContext(ctx).upstreamKey
 }
 
 func apiKeyFromHeader(r *http.Request, header string) (string, bool) {
@@ -51,6 +69,12 @@ func apiKeyFromHeader(r *http.Request, header string) (string, bool) {
 	return key, true
 }
 
+func apiKeysEqual(provided string, expected string) bool {
+	providedHash := sha256.Sum256([]byte(provided))
+	expectedHash := sha256.Sum256([]byte(expected))
+	return subtle.ConstantTimeCompare(providedHash[:], expectedHash[:]) == 1
+}
+
 func apiKeyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, ok := apiKeyFromHeader(r, "X-API-Key")
@@ -58,9 +82,46 @@ func apiKeyMiddleware(next http.Handler) http.Handler {
 			http.Error(w, "missing X-API-Key header", http.StatusUnauthorized)
 			return
 		}
-		ctx := context.WithValue(r.Context(), contextKey{}, key)
+		ctx := context.WithValue(r.Context(), contextKey{}, trpcCredential{
+			kind:        trpcCredentialUpstream,
+			upstreamKey: key,
+		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func transactionReadKeyMiddleware(
+	transactionReadKey string,
+	transactionLocalOnly bool,
+) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if transactionReadKey == "" || !transactionLocalOnly {
+				http.NotFound(w, r)
+				return
+			}
+
+			key, ok := apiKeyFromHeader(r, "X-Gateway-Transaction-Key")
+			if !ok || !apiKeysEqual(key, transactionReadKey) {
+				http.Error(
+					w,
+					"missing or invalid X-Gateway-Transaction-Key header",
+					http.StatusUnauthorized,
+				)
+				return
+			}
+
+			if _, hasUpstreamKey := r.Header[http.CanonicalHeaderKey("X-API-Key")]; hasUpstreamKey {
+				http.Error(w, "ambiguous Gateway credential headers", http.StatusBadRequest)
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), contextKey{}, trpcCredential{
+				kind: trpcCredentialTransaction,
+			})
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
 func adminKeyMiddleware(adminKey string) func(http.Handler) http.Handler {
@@ -219,22 +280,24 @@ func main() {
 }
 
 type serviceConfig struct {
-	adminAPIKey          string
-	marketReadAPIKey     string
-	corsAllowedOrigins   []string
-	publicStats          bool
-	transactionLocalOnly bool
-	transactionStateFile string
+	adminAPIKey           string
+	marketReadAPIKey      string
+	corsAllowedOrigins    []string
+	publicStats           bool
+	transactionLocalOnly  bool
+	transactionReadAPIKey string
+	transactionStateFile  string
 }
 
 func loadServiceConfig() serviceConfig {
 	return serviceConfig{
-		adminAPIKey:          strings.TrimSpace(os.Getenv(gatewayAdminAPIKeyEnv)),
-		marketReadAPIKey:     strings.TrimSpace(os.Getenv(gatewayMarketReadAPIKeyEnv)),
-		corsAllowedOrigins:   splitCSV(os.Getenv(gatewayCORSAllowedOriginsEnv)),
-		publicStats:          parseBoolEnv(os.Getenv(gatewayEnablePublicStatsPagesEnv)),
-		transactionLocalOnly: parseBoolEnv(os.Getenv(gatewayTransactionLocalOnlyEnv)),
-		transactionStateFile: market.StateFile(getDataDir()),
+		adminAPIKey:           strings.TrimSpace(os.Getenv(gatewayAdminAPIKeyEnv)),
+		marketReadAPIKey:      strings.TrimSpace(os.Getenv(gatewayMarketReadAPIKeyEnv)),
+		corsAllowedOrigins:    splitCSV(os.Getenv(gatewayCORSAllowedOriginsEnv)),
+		publicStats:           parseBoolEnv(os.Getenv(gatewayEnablePublicStatsPagesEnv)),
+		transactionLocalOnly:  parseBoolEnv(os.Getenv(gatewayTransactionLocalOnlyEnv)),
+		transactionReadAPIKey: strings.TrimSpace(os.Getenv(gatewayTransactionReadAPIKeyEnv)),
+		transactionStateFile:  market.StateFile(getDataDir()),
 	}
 }
 
@@ -297,9 +360,16 @@ func service(db *gorm.DB, stats *Stats) http.Handler {
 	r.Use(middleware.CleanPath)
 	r.Use(middleware.Throttle(128))
 
-	trpc_handler := trpc_handler(pool, c, db, stats, cfg.transactionLocalOnly)
-	r.With(apiKeyMiddleware).Method(http.MethodGet, "/trpc/*", trpc_handler)
-	r.With(apiKeyMiddleware).Method(http.MethodPost, "/trpc/*", trpc_handler)
+	trpcHandler := trpc_handler(pool, c, db, stats, cfg.transactionLocalOnly)
+	transactionRoute := "/trpc/transaction.getPaginatedTransactions"
+	transactionAuth := transactionReadKeyMiddleware(
+		cfg.transactionReadAPIKey,
+		cfg.transactionLocalOnly,
+	)
+	r.With(transactionAuth).Method(http.MethodGet, transactionRoute, trpcHandler)
+	r.With(transactionAuth).Method(http.MethodPost, transactionRoute, trpcHandler)
+	r.With(apiKeyMiddleware).Method(http.MethodGet, "/trpc/*", trpcHandler)
+	r.With(apiKeyMiddleware).Method(http.MethodPost, "/trpc/*", trpcHandler)
 
 	if cfg.publicStats {
 		r.Get("/api/stats", stats.HTTPHandler())

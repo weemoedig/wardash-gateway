@@ -154,6 +154,119 @@ func TestTransactionLocalOnlyRequiresExplicitConfiguration(t *testing.T) {
 	})
 }
 
+func TestTransactionReadCredentialIsIsolatedFromUpstreamCredentials(t *testing.T) {
+	next := transactionReadKeyMiddleware("transaction-secret", true)(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			credential := trpcCredentialFromContext(r.Context())
+			if credential.kind != trpcCredentialTransaction {
+				t.Fatalf("credential kind = %q, want transaction", credential.kind)
+			}
+			if credential.upstreamKey != "" || apiKeyFromContext(r.Context()) != "" {
+				t.Fatal("transaction secret was exposed as an upstream credential")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/trpc/transaction.getPaginatedTransactions",
+		nil,
+	)
+	req.Header.Set("X-Gateway-Transaction-Key", "transaction-secret")
+	rec := httptest.NewRecorder()
+
+	next.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+}
+
+func TestTransactionReadCredentialRejectsAmbiguousOrDisabledUse(t *testing.T) {
+	tests := []struct {
+		localOnly bool
+		headers   map[string]string
+		status    int
+		name      string
+	}{
+		{
+			name:      "disabled local reads stay hidden",
+			localOnly: false,
+			headers: map[string]string{
+				"X-Gateway-Transaction-Key": "transaction-secret",
+			},
+			status: http.StatusNotFound,
+		},
+		{
+			name:      "both credential headers are rejected",
+			localOnly: true,
+			headers: map[string]string{
+				"X-Gateway-Transaction-Key": "transaction-secret",
+				"X-API-Key":                 "upstream-secret",
+			},
+			status: http.StatusBadRequest,
+		},
+		{
+			name:      "an explicitly blank upstream header is still ambiguous",
+			localOnly: true,
+			headers: map[string]string{
+				"X-Gateway-Transaction-Key": "transaction-secret",
+				"X-API-Key":                 "",
+			},
+			status: http.StatusBadRequest,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			next := transactionReadKeyMiddleware("transaction-secret", test.localOnly)(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				}),
+			)
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/trpc/transaction.getPaginatedTransactions",
+				nil,
+			)
+			for name, value := range test.headers {
+				req.Header.Set(name, value)
+			}
+			rec := httptest.NewRecorder()
+
+			next.ServeHTTP(rec, req)
+
+			if rec.Code != test.status {
+				t.Fatalf("status = %d, want %d", rec.Code, test.status)
+			}
+		})
+	}
+}
+
+func TestGenericUpstreamCredentialCannotReadTransactions(t *testing.T) {
+	handler := apiKeyMiddleware(trpc_handler(
+		nil,
+		nil,
+		nil,
+		NewStats(t.TempDir()+"/stats.json", allowedMethods),
+		true,
+	))
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/trpc/transaction.getPaginatedTransactions?input=%7B%22limit%22%3A1%7D",
+		nil,
+	)
+	req.Header.Set("X-API-Key", "upstream-secret")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
 func TestMarketDailyRouteRequiresDedicatedReadKey(t *testing.T) {
 	t.Setenv(gatewayAdminAPIKeyEnv, "admin-secret")
 	t.Setenv(gatewayMarketReadAPIKeyEnv, "market-secret")
