@@ -16,7 +16,6 @@ import (
 )
 
 const maxBatchSize = 50
-const maxLoggedErrorBodyBytes int64 = 4096
 
 var errBatcherClosed = errors.New("batcher is closed")
 
@@ -278,9 +277,12 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 	defer res.Body.Close()
 
 	if res.StatusCode < 200 || res.StatusCode > 299 {
-		body, _ := readLimited(res.Body, maxLoggedErrorBodyBytes)
-		slog.Error("Received fail response from request", "status_code", res.StatusCode, "body", string(body))
-		signalAll(pending, fmt.Errorf("http %d: %s", res.StatusCode, string(body)))
+		slog.Error(
+			"Received fail response from request",
+			"status_code", res.StatusCode,
+			"content_length", res.ContentLength,
+		)
+		signalAll(pending, fmt.Errorf("upstream returned HTTP status %d", res.StatusCode))
 		return
 	}
 
@@ -307,7 +309,12 @@ func (gb *GlobalBatcher) executePending(pending []pendingCall) {
 		}
 	}
 	if err != nil {
-		slog.Error("Could not unmarshal batch response", "body", string(body), "error", err)
+		slog.Error(
+			"Could not unmarshal batch response",
+			"status_code", res.StatusCode,
+			"response_bytes", len(body),
+			"error", err,
+		)
 		signalAll(pending, err)
 		return
 	}
