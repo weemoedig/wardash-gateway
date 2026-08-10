@@ -31,13 +31,14 @@ type apiResponse struct {
 }
 
 const (
-	defaultScrapeIntervalSeconds     = 5
-	defaultScraperRequestsPerMinute  = 200
-	defaultTransactionRetentionDays  = 30
-	maxMarketRollupRetentionDays     = 30
-	transactionBackfillPagesPerCycle = 24
-	transactionPageLimit             = 100
-	transactionStateFilename         = market.TransactionStateFilename
+	defaultScrapeIntervalSeconds        = 5
+	defaultScraperRequestsPerMinute     = 200
+	defaultTransactionRetentionDays     = 30
+	maxMarketRollupRetentionDays        = 30
+	transactionIncrementalPagesPerCycle = 24
+	transactionBackfillPagesPerCycle    = 24
+	transactionPageLimit                = 100
+	transactionStateFilename            = market.TransactionStateFilename
 )
 
 type scraperDataset string
@@ -334,6 +335,60 @@ func recordIncrementalCoverage(
 	return refreshMarketAvailabilityFromFrontier(state, now, retentionDays)
 }
 
+func incrementalSweepStartedAt(
+	state transactionBackfillState,
+	now time.Time,
+) (time.Time, error) {
+	hasStartedAt := state.IncrementalStartedAt != nil &&
+		!state.IncrementalStartedAt.IsZero()
+	hasProgress := state.IncrementalCursor != "" || state.IncrementalReplay
+	if hasStartedAt != hasProgress {
+		return time.Time{}, fmt.Errorf(
+			"incremental transaction progress state is inconsistent",
+		)
+	}
+	if hasStartedAt {
+		return state.IncrementalStartedAt.UTC(), nil
+	}
+	return now.UTC(), nil
+}
+
+func prepareIncrementalReplayState(
+	state transactionBackfillState,
+	startedAt time.Time,
+	cursor string,
+	now time.Time,
+) transactionBackfillState {
+	started := startedAt.UTC()
+	state.IncrementalStartedAt = &started
+	state.IncrementalCursor = cursor
+	state.IncrementalReplay = true
+	state.UpdatedAt = now.UTC()
+	return state
+}
+
+func recordIncrementalContinuation(
+	state *transactionBackfillState,
+	nextCursor string,
+	now time.Time,
+) error {
+	if state.IncrementalStartedAt == nil ||
+		state.IncrementalStartedAt.IsZero() ||
+		strings.TrimSpace(nextCursor) == "" {
+		return fmt.Errorf("incremental transaction continuation is incomplete")
+	}
+	state.IncrementalCursor = nextCursor
+	state.IncrementalReplay = false
+	state.UpdatedAt = now.UTC()
+	return nil
+}
+
+func clearIncrementalProgress(state *transactionBackfillState) {
+	state.IncrementalCursor = ""
+	state.IncrementalStartedAt = nil
+	state.IncrementalReplay = false
+}
+
 func marketReliableCoverageAdvanced(
 	previousCoveredThrough *time.Time,
 	currentCoveredThrough *time.Time,
@@ -530,6 +585,24 @@ func scrapeConfigured(
 	config scraperConfig,
 	backfillState *transactionBackfillState,
 ) error {
+	return scrapeConfiguredWithTransactionStore(
+		ctx,
+		s,
+		db,
+		gormTransactionStore{db: db},
+		config,
+		backfillState,
+	)
+}
+
+func scrapeConfiguredWithTransactionStore(
+	ctx context.Context,
+	s requester,
+	db *gorm.DB,
+	transactions transactionStore,
+	config scraperConfig,
+	backfillState *transactionBackfillState,
+) error {
 	var wg sync.WaitGroup
 	var transactionErr error
 
@@ -548,14 +621,47 @@ func scrapeConfigured(
 	if config.datasetEnabled(datasetTransactions) {
 		wg.Go(func() {
 			incrementalStartedAt := time.Now()
+			coverageStartedAt, err := incrementalSweepStartedAt(
+				*backfillState,
+				incrementalStartedAt,
+			)
+			if err != nil {
+				slog.Error("Invalid incremental transaction progress", "error", err)
+				transactionErr = err
+				return
+			}
+			incrementalCursor := backfillState.IncrementalCursor
+			stopOnKnownOverlap := !backfillState.IncrementalReplay
+			beforeIncrementalPersist := func() error {
+				replayState := prepareIncrementalReplayState(
+					*backfillState,
+					coverageStartedAt,
+					incrementalCursor,
+					time.Now(),
+				)
+				if err := saveTransactionBackfillState(
+					config.stateFile,
+					replayState,
+				); err != nil {
+					return fmt.Errorf(
+						"save incremental transaction replay state: %w",
+						err,
+					)
+				}
+				*backfillState = replayState
+				return nil
+			}
 			incrementalSummary, err := scrapeTransactionPages(
 				ctx,
 				s,
-				gormTransactionStore{db: db},
+				transactions,
 				transactionCutoff(incrementalStartedAt, config.transactionRetentionDays),
-				false,
-				"",
-				0,
+				transactionScrapeOptions{
+					StartCursor:              incrementalCursor,
+					MaxPages:                 transactionIncrementalPagesPerCycle,
+					StopOnKnownOverlap:       stopOnKnownOverlap,
+					BeforeIncrementalPersist: beforeIncrementalPersist,
+				},
 			)
 			logTransactionScrapeSummary(
 				ctx,
@@ -574,9 +680,32 @@ func scrapeConfigured(
 			)
 			coverageRecordedAt := time.Now()
 			incrementalState := *backfillState
+			if incrementalSummary.StopReason == "page_budget" {
+				if err := recordIncrementalContinuation(
+					&incrementalState,
+					incrementalSummary.NextCursor,
+					coverageRecordedAt,
+				); err != nil {
+					slog.Error("Failed to record incremental transaction continuation", "error", err)
+					transactionErr = err
+					return
+				}
+				if err := saveTransactionBackfillState(
+					config.stateFile,
+					incrementalState,
+				); err != nil {
+					slog.Error("Failed to save incremental transaction continuation", "error", err)
+					transactionErr = err
+					return
+				}
+				*backfillState = incrementalState
+				return
+			}
+
+			clearIncrementalProgress(&incrementalState)
 			if err := recordIncrementalCoverage(
 				&incrementalState,
-				incrementalStartedAt,
+				coverageStartedAt,
 				coverageRecordedAt,
 				retentionDays,
 			); err != nil {
@@ -632,11 +761,13 @@ func scrapeConfigured(
 			backfillSummary, err := scrapeTransactionPages(
 				ctx,
 				s,
-				gormTransactionStore{db: db},
+				transactions,
 				backfillCutoff,
-				true,
-				backfillState.Cursor,
-				transactionBackfillPagesPerCycle,
+				transactionScrapeOptions{
+					FullBackfill: true,
+					StartCursor:  backfillState.Cursor,
+					MaxPages:     transactionBackfillPagesPerCycle,
+				},
 			)
 			logTransactionScrapeSummary(
 				ctx,
@@ -749,6 +880,14 @@ type transactionScrapeSummary struct {
 	NextCursor        string
 	BackfillComplete  bool
 	OldestProcessedAt *time.Time
+}
+
+type transactionScrapeOptions struct {
+	FullBackfill             bool
+	StartCursor              string
+	MaxPages                 int
+	StopOnKnownOverlap       bool
+	BeforeIncrementalPersist func() error
 }
 
 type transactionBackfillState = market.BackfillState
@@ -891,12 +1030,10 @@ func scrapeTransactionPages(
 	s requester,
 	store transactionStore,
 	cutoff time.Time,
-	fullBackfill bool,
-	startCursor string,
-	maxPages int,
+	options transactionScrapeOptions,
 ) (transactionScrapeSummary, error) {
 	summary := transactionScrapeSummary{}
-	cursor := startCursor
+	cursor := options.StartCursor
 	pendingIncremental := make([]transactionPageRecord, 0)
 
 	for {
@@ -937,7 +1074,7 @@ func scrapeTransactionPages(
 				)
 			}
 			summary.StopReason = "empty_page"
-			summary.BackfillComplete = fullBackfill
+			summary.BackfillComplete = options.FullBackfill
 			break
 		}
 
@@ -996,7 +1133,7 @@ func scrapeTransactionPages(
 			newRecords = append(newRecords, record)
 		}
 
-		if fullBackfill {
+		if options.FullBackfill {
 			inserted, err := store.persist(newRecords)
 			if err != nil {
 				summary.StopReason = "database_write_error"
@@ -1012,15 +1149,17 @@ func scrapeTransactionPages(
 		switch {
 		case cutoffReached:
 			summary.StopReason = "retention_cutoff"
-			summary.BackfillComplete = fullBackfill
+			summary.BackfillComplete = options.FullBackfill
 			retentionFrontier := cutoff.UTC()
 			summary.OldestProcessedAt = &retentionFrontier
-		case !fullBackfill && knownOverlap:
+		case !options.FullBackfill &&
+			options.StopOnKnownOverlap &&
+			knownOverlap:
 			summary.StopReason = "known_overlap"
 		case nextCursor == "":
 			summary.StopReason = "end_of_feed"
-			summary.BackfillComplete = fullBackfill
-		case maxPages > 0 && summary.Pages >= maxPages:
+			summary.BackfillComplete = options.FullBackfill
+		case options.MaxPages > 0 && summary.Pages >= options.MaxPages:
 			summary.StopReason = "page_budget"
 			summary.NextCursor = nextCursor
 		default:
@@ -1030,7 +1169,13 @@ func scrapeTransactionPages(
 		break
 	}
 
-	if !fullBackfill {
+	if !options.FullBackfill {
+		if options.BeforeIncrementalPersist != nil {
+			if err := options.BeforeIncrementalPersist(); err != nil {
+				summary.StopReason = "state_write_error"
+				return summary, err
+			}
+		}
 		inserted, err := store.persist(pendingIncremental)
 		if err != nil {
 			summary.StopReason = "database_write_error"

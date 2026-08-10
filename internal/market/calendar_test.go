@@ -151,6 +151,7 @@ func TestBackfillStateRoundTripIsBackwardCompatibleAndPrivate(t *testing.T) {
 		0,
 		time.UTC,
 	)
+	incrementalStartedAt := coveredThrough.Add(-time.Hour)
 	want := BackfillState{
 		Completed:                 true,
 		Cursor:                    "must-not-survive-completion",
@@ -159,6 +160,9 @@ func TestBackfillStateRoundTripIsBackwardCompatibleAndPrivate(t *testing.T) {
 		CompletionReason:          "retention_cutoff",
 		BackfillOldestProcessedAt: &oldestProcessedAt,
 		IncrementalCoveredThrough: &coveredThrough,
+		IncrementalCursor:         "incremental-cursor",
+		IncrementalStartedAt:      &incrementalStartedAt,
+		IncrementalReplay:         true,
 	}
 
 	if err := SaveBackfillState(path, want); err != nil {
@@ -176,6 +180,10 @@ func TestBackfillStateRoundTripIsBackwardCompatibleAndPrivate(t *testing.T) {
 		!got.BackfillOldestProcessedAt.Equal(oldestProcessedAt) ||
 		got.IncrementalCoveredThrough == nil ||
 		!got.IncrementalCoveredThrough.Equal(coveredThrough) ||
+		got.IncrementalCursor != want.IncrementalCursor ||
+		got.IncrementalStartedAt == nil ||
+		!got.IncrementalStartedAt.Equal(incrementalStartedAt) ||
+		!got.IncrementalReplay ||
 		!got.UpdatedAt.Equal(want.UpdatedAt) {
 		t.Fatalf("state = %+v, want completed state with coverage metadata", got)
 	}
@@ -204,7 +212,10 @@ func TestBackfillStateRoundTripIsBackwardCompatibleAndPrivate(t *testing.T) {
 		legacy.AvailableSince != "" ||
 		legacy.CompletionReason != "" ||
 		legacy.BackfillOldestProcessedAt != nil ||
-		legacy.IncrementalCoveredThrough != nil {
+		legacy.IncrementalCoveredThrough != nil ||
+		legacy.IncrementalCursor != "" ||
+		legacy.IncrementalStartedAt != nil ||
+		legacy.IncrementalReplay {
 		t.Fatalf("legacy state = %+v, want zero values for new fields", legacy)
 	}
 }

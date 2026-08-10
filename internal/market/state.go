@@ -19,6 +19,9 @@ type BackfillState struct {
 	CompletionReason          string     `json:"completionReason,omitempty"`
 	BackfillOldestProcessedAt *time.Time `json:"backfillOldestProcessedAt,omitempty"`
 	IncrementalCoveredThrough *time.Time `json:"incrementalCoveredThrough,omitempty"`
+	IncrementalCursor         string     `json:"incrementalCursor,omitempty"`
+	IncrementalStartedAt      *time.Time `json:"incrementalStartedAt,omitempty"`
+	IncrementalReplay         bool       `json:"incrementalReplay,omitempty"`
 }
 
 func StateFile(dataDir string) string {

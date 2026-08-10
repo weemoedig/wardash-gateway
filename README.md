@@ -28,10 +28,13 @@ dedicated `GATEWAY_TRANSACTION_READ_API_KEY` through
 `X-Gateway-Transaction-Key`; ordinary WarEra `X-API-Key` credentials are
 rejected for this method and the transaction secret is never forwarded to
 WarEra. Incremental cycles ingest new
-transactions first; the bounded historical backfill then advances by at most 24
-pages per cycle and persists its cursor in the configured data directory.
-Restarts resume that cursor instead of restarting the import. See `env.example`
-for backward-compatible defaults.
+transactions first. Both an incremental catch-up after downtime and the
+historical backfill advance by at most 24 pages per cycle and persist their
+separate cursors in the configured data directory. Incremental data is written
+only after replay state is durable, so a state-write failure cannot create an
+unrecoverable gap. Restarts replay or resume the bounded chunk instead of
+buffering the complete downtime window in memory. See `env.example` for
+backward-compatible defaults.
 
 ### WarDash market rollups
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -28,8 +29,10 @@ func (f *fakeRequester) Request(
 }
 
 type fakeTransactionStore struct {
-	existing  map[string]struct{}
-	persisted []string
+	existing        map[string]struct{}
+	persisted       []string
+	persistAttempts int
+	persistErr      error
 }
 
 func (f *fakeTransactionStore) findExistingIDs(ids []string) (map[string]struct{}, error) {
@@ -43,6 +46,11 @@ func (f *fakeTransactionStore) findExistingIDs(ids []string) (map[string]struct{
 }
 
 func (f *fakeTransactionStore) persist(records []transactionPageRecord) (int, error) {
+	f.persistAttempts++
+	if f.persistErr != nil {
+		return 0, f.persistErr
+	}
+
 	inserted := 0
 	for _, record := range records {
 		if _, exists := f.existing[record.id]; exists {
@@ -195,9 +203,7 @@ func TestIncrementalTransactionScrapeHealsUnknownItemsOnOverlapPage(t *testing.T
 		requester,
 		store,
 		now.Add(-30*24*time.Hour),
-		false,
-		"",
-		0,
+		transactionScrapeOptions{StopOnKnownOverlap: true},
 	)
 	if err != nil {
 		t.Fatalf("scrapeTransactionPages returned error: %v", err)
@@ -215,6 +221,312 @@ func TestIncrementalTransactionScrapeHealsUnknownItemsOnOverlapPage(t *testing.T
 		store.persisted[0] != "new-a" ||
 		store.persisted[1] != "new-c" {
 		t.Fatalf("persisted = %v, want [new-a new-c]", store.persisted)
+	}
+}
+
+func TestIncrementalTransactionScrapePersistsOnlyAfterReplayState(t *testing.T) {
+	now := time.Date(2026, time.July, 30, 20, 0, 0, 0, time.UTC)
+	requester := &fakeRequester{responses: []json.RawMessage{
+		transactionResponse([]json.RawMessage{
+			transactionItem("new-a", now),
+		}, "page-two"),
+	}}
+	store := &fakeTransactionStore{existing: map[string]struct{}{}}
+	replayPrepared := false
+
+	summary, err := scrapeTransactionPages(
+		context.Background(),
+		requester,
+		store,
+		now.Add(-30*24*time.Hour),
+		transactionScrapeOptions{
+			MaxPages:           1,
+			StopOnKnownOverlap: true,
+			BeforeIncrementalPersist: func() error {
+				if len(store.persisted) != 0 {
+					t.Fatal("records persisted before replay state")
+				}
+				replayPrepared = true
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("scrapeTransactionPages returned error: %v", err)
+	}
+	if !replayPrepared {
+		t.Fatal("incremental replay state was not prepared")
+	}
+	if summary.StopReason != "page_budget" || summary.NextCursor != "page-two" {
+		t.Fatalf("summary = %+v, want bounded continuation", summary)
+	}
+	if len(store.persisted) != 1 || store.persisted[0] != "new-a" {
+		t.Fatalf("persisted = %v, want [new-a]", store.persisted)
+	}
+}
+
+func TestIncrementalTransactionReplayIgnoresPersistedOverlap(t *testing.T) {
+	now := time.Date(2026, time.July, 30, 20, 0, 0, 0, time.UTC)
+	requester := &fakeRequester{responses: []json.RawMessage{
+		transactionResponse([]json.RawMessage{
+			transactionItem("known-a", now),
+			transactionItem("new-b", now.Add(-time.Minute)),
+		}, "page-two"),
+	}}
+	store := &fakeTransactionStore{
+		existing: map[string]struct{}{"known-a": {}},
+	}
+
+	summary, err := scrapeTransactionPages(
+		context.Background(),
+		requester,
+		store,
+		now.Add(-30*24*time.Hour),
+		transactionScrapeOptions{
+			MaxPages:           1,
+			StopOnKnownOverlap: false,
+		},
+	)
+	if err != nil {
+		t.Fatalf("scrapeTransactionPages returned error: %v", err)
+	}
+	if summary.StopReason != "page_budget" || summary.NextCursor != "page-two" {
+		t.Fatalf("summary = %+v, want replay continuation", summary)
+	}
+	if summary.Known != 1 || summary.New != 1 ||
+		len(store.persisted) != 1 || store.persisted[0] != "new-b" {
+		t.Fatalf("summary = %+v persisted = %v, want known overlap healed",
+			summary,
+			store.persisted,
+		)
+	}
+}
+
+func TestIncrementalTransactionStateFailurePreventsPersistence(t *testing.T) {
+	now := time.Date(2026, time.July, 30, 20, 0, 0, 0, time.UTC)
+	requester := &fakeRequester{responses: []json.RawMessage{
+		transactionResponse([]json.RawMessage{
+			transactionItem("new-a", now),
+		}, "page-two"),
+	}}
+	store := &fakeTransactionStore{existing: map[string]struct{}{}}
+
+	summary, err := scrapeTransactionPages(
+		context.Background(),
+		requester,
+		store,
+		now.Add(-30*24*time.Hour),
+		transactionScrapeOptions{
+			MaxPages: 1,
+			BeforeIncrementalPersist: func() error {
+				return errors.New("state unavailable")
+			},
+		},
+	)
+	if err == nil {
+		t.Fatal("scrapeTransactionPages returned nil, want state failure")
+	}
+	if summary.StopReason != "state_write_error" {
+		t.Fatalf("stop reason = %q, want state_write_error", summary.StopReason)
+	}
+	if len(store.persisted) != 0 {
+		t.Fatalf("persisted = %v, want none after state failure", store.persisted)
+	}
+}
+
+func TestConfiguredIncrementalDatabaseFailureReplaysAfterRestart(t *testing.T) {
+	now := time.Now().UTC()
+	response := transactionResponse([]json.RawMessage{
+		transactionItem("new-a", now),
+	}, "")
+	store := &fakeTransactionStore{
+		existing:   map[string]struct{}{},
+		persistErr: errors.New("database unavailable"),
+	}
+	stateFile := t.TempDir() + "/" + transactionStateFilename
+	coveredThrough := now.Add(-time.Minute)
+	state := transactionBackfillState{
+		Completed:                 true,
+		IncrementalCoveredThrough: &coveredThrough,
+	}
+	config := scraperConfig{
+		datasets: map[scraperDataset]struct{}{
+			datasetTransactions: {},
+		},
+		stateFile:                stateFile,
+		transactionRetentionDays: 30,
+	}
+
+	if err := scrapeConfiguredWithTransactionStore(
+		context.Background(),
+		&fakeRequester{responses: []json.RawMessage{response}},
+		nil,
+		store,
+		config,
+		&state,
+	); err == nil {
+		t.Fatal("scrapeConfiguredWithTransactionStore returned nil, want database failure")
+	}
+	if !state.IncrementalReplay ||
+		state.IncrementalStartedAt == nil ||
+		state.IncrementalCursor != "" ||
+		len(store.persisted) != 0 {
+		t.Fatalf("failed state = %+v persisted = %v, want replay marker without rows",
+			state,
+			store.persisted,
+		)
+	}
+
+	restartedState, err := loadTransactionBackfillState(stateFile)
+	if err != nil {
+		t.Fatalf("loadTransactionBackfillState returned error: %v", err)
+	}
+	if !restartedState.IncrementalReplay ||
+		restartedState.IncrementalStartedAt == nil ||
+		restartedState.IncrementalCursor != "" {
+		t.Fatalf("persisted failed state = %+v, want restart replay marker", restartedState)
+	}
+	replayStartedAt := *restartedState.IncrementalStartedAt
+	store.persistErr = nil
+
+	if err := scrapeConfiguredWithTransactionStore(
+		context.Background(),
+		&fakeRequester{responses: []json.RawMessage{response}},
+		nil,
+		store,
+		config,
+		&restartedState,
+	); err != nil {
+		t.Fatalf("restart replay returned error: %v", err)
+	}
+	if restartedState.IncrementalReplay ||
+		restartedState.IncrementalStartedAt != nil ||
+		restartedState.IncrementalCursor != "" ||
+		restartedState.IncrementalCoveredThrough == nil ||
+		!restartedState.IncrementalCoveredThrough.Equal(replayStartedAt) {
+		t.Fatalf("restarted state = %+v, want completed original sweep", restartedState)
+	}
+	if store.persistAttempts != 2 ||
+		len(store.persisted) != 1 ||
+		store.persisted[0] != "new-a" {
+		t.Fatalf("attempts = %d persisted = %v, want one idempotent replay",
+			store.persistAttempts,
+			store.persisted,
+		)
+	}
+}
+
+func TestConfiguredIncrementalCatchupPersistsBoundedContinuation(t *testing.T) {
+	responses := make([]json.RawMessage, 0, transactionIncrementalPagesPerCycle)
+	now := time.Now().UTC()
+	for page := 1; page <= transactionIncrementalPagesPerCycle; page++ {
+		responses = append(responses, transactionResponse(
+			[]json.RawMessage{
+				transactionItem(fmt.Sprintf("new-%d", page), now.Add(-time.Duration(page)*time.Minute)),
+			},
+			fmt.Sprintf("cursor-%d", page),
+		))
+	}
+	requester := &fakeRequester{responses: responses}
+	store := &fakeTransactionStore{existing: map[string]struct{}{}}
+	stateFile := t.TempDir() + "/" + transactionStateFilename
+	coveredThrough := now.Add(-time.Hour)
+	state := transactionBackfillState{
+		Completed:                 true,
+		IncrementalCoveredThrough: &coveredThrough,
+	}
+	config := scraperConfig{
+		datasets: map[scraperDataset]struct{}{
+			datasetTransactions: {},
+		},
+		stateFile:                stateFile,
+		transactionRetentionDays: 30,
+	}
+
+	if err := scrapeConfiguredWithTransactionStore(
+		context.Background(),
+		requester,
+		nil,
+		store,
+		config,
+		&state,
+	); err != nil {
+		t.Fatalf("scrapeConfiguredWithTransactionStore returned error: %v", err)
+	}
+	if requester.calls != transactionIncrementalPagesPerCycle ||
+		len(store.persisted) != transactionIncrementalPagesPerCycle {
+		t.Fatalf("calls = %d persisted = %d, want %d bounded pages",
+			requester.calls,
+			len(store.persisted),
+			transactionIncrementalPagesPerCycle,
+		)
+	}
+	if state.IncrementalCursor != "cursor-24" ||
+		state.IncrementalStartedAt == nil ||
+		state.IncrementalReplay ||
+		state.IncrementalCoveredThrough == nil ||
+		!state.IncrementalCoveredThrough.Equal(coveredThrough) {
+		t.Fatalf("state = %+v, want pending bounded continuation", state)
+	}
+	persisted, err := loadTransactionBackfillState(stateFile)
+	if err != nil {
+		t.Fatalf("loadTransactionBackfillState returned error: %v", err)
+	}
+	if persisted.IncrementalCursor != state.IncrementalCursor ||
+		persisted.IncrementalStartedAt == nil ||
+		!persisted.IncrementalStartedAt.Equal(*state.IncrementalStartedAt) ||
+		persisted.IncrementalReplay {
+		t.Fatalf("persisted state = %+v, want resumable continuation", persisted)
+	}
+}
+
+func TestConfiguredIncrementalReplayCompletesWithOriginalCoverageTime(t *testing.T) {
+	startedAt := time.Now().UTC().Add(-5 * time.Minute)
+	coveredThrough := startedAt
+	requester := &fakeRequester{responses: []json.RawMessage{
+		transactionResponse([]json.RawMessage{
+			transactionItem("known-a", startedAt),
+			transactionItem("new-b", startedAt.Add(-time.Minute)),
+		}, ""),
+	}}
+	store := &fakeTransactionStore{
+		existing: map[string]struct{}{"known-a": {}},
+	}
+	stateFile := t.TempDir() + "/" + transactionStateFilename
+	state := transactionBackfillState{
+		Completed:                 true,
+		IncrementalCoveredThrough: &coveredThrough,
+		IncrementalCursor:         "resume-cursor",
+		IncrementalStartedAt:      &startedAt,
+		IncrementalReplay:         true,
+	}
+	config := scraperConfig{
+		datasets: map[scraperDataset]struct{}{
+			datasetTransactions: {},
+		},
+		stateFile:                stateFile,
+		transactionRetentionDays: 30,
+	}
+
+	if err := scrapeConfiguredWithTransactionStore(
+		context.Background(),
+		requester,
+		nil,
+		store,
+		config,
+		&state,
+	); err != nil {
+		t.Fatalf("scrapeConfiguredWithTransactionStore returned error: %v", err)
+	}
+	if state.IncrementalCursor != "" ||
+		state.IncrementalStartedAt != nil ||
+		state.IncrementalReplay ||
+		state.IncrementalCoveredThrough == nil ||
+		!state.IncrementalCoveredThrough.Equal(startedAt) {
+		t.Fatalf("state = %+v, want completed original coverage time", state)
+	}
+	if len(store.persisted) != 1 || store.persisted[0] != "new-b" {
+		t.Fatalf("persisted = %v, want replayed new record", store.persisted)
 	}
 }
 
@@ -239,9 +551,7 @@ func TestFullTransactionBackfillIgnoresKnownOverlapUntilCutoff(t *testing.T) {
 		requester,
 		store,
 		cutoff,
-		true,
-		"",
-		0,
+		transactionScrapeOptions{FullBackfill: true},
 	)
 	if err != nil {
 		t.Fatalf("scrapeTransactionPages returned error: %v", err)
@@ -274,9 +584,10 @@ func TestTransactionBackfillReturnsResumeCursorAtPageBudget(t *testing.T) {
 		requester,
 		store,
 		now.Add(-30*24*time.Hour),
-		true,
-		"",
-		1,
+		transactionScrapeOptions{
+			FullBackfill: true,
+			MaxPages:     1,
+		},
 	)
 	if err != nil {
 		t.Fatalf("scrapeTransactionPages returned error: %v", err)
@@ -329,9 +640,10 @@ func TestTransactionBackfillFrontierUsesCursorBoundaryNotLooseExpiredMinimum(
 		requester,
 		store,
 		cutoff,
-		true,
-		"",
-		1,
+		transactionScrapeOptions{
+			FullBackfill: true,
+			MaxPages:     1,
+		},
 	)
 	if err != nil {
 		t.Fatalf("scrapeTransactionPages returned error: %v", err)
@@ -370,9 +682,10 @@ func TestTransactionScrapeFailsClosedWithoutValidCursorBoundary(t *testing.T) {
 		requester,
 		store,
 		time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
-		true,
-		"",
-		1,
+		transactionScrapeOptions{
+			FullBackfill: true,
+			MaxPages:     1,
+		},
 	)
 	if err == nil {
 		t.Fatal("scrapeTransactionPages returned nil, want invalid boundary error")
@@ -395,9 +708,10 @@ func TestTransactionScrapeRejectsEmptyPageWithContinuationCursor(t *testing.T) {
 		requester,
 		store,
 		time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
-		true,
-		"",
-		1,
+		transactionScrapeOptions{
+			FullBackfill: true,
+			MaxPages:     1,
+		},
 	)
 	if err == nil {
 		t.Fatal("scrapeTransactionPages returned nil, want cursor-boundary error")
@@ -419,9 +733,7 @@ func TestTransactionBackfillTreatsEmptyPageAsComplete(t *testing.T) {
 		requester,
 		store,
 		time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
-		true,
-		"",
-		0,
+		transactionScrapeOptions{FullBackfill: true},
 	)
 	if err != nil {
 		t.Fatalf("scrapeTransactionPages returned error: %v", err)
@@ -453,6 +765,7 @@ func TestTransactionBackfillStateRoundTrip(t *testing.T) {
 		0,
 		time.UTC,
 	)
+	incrementalStartedAt := coveredThrough.Add(-time.Hour)
 	want := transactionBackfillState{
 		Cursor:                    "opaque-cursor",
 		UpdatedAt:                 time.Date(2026, time.July, 30, 20, 0, 0, 0, time.UTC),
@@ -460,6 +773,9 @@ func TestTransactionBackfillStateRoundTrip(t *testing.T) {
 		CompletionReason:          "",
 		BackfillOldestProcessedAt: &oldestProcessedAt,
 		IncrementalCoveredThrough: &coveredThrough,
+		IncrementalCursor:         "incremental-cursor",
+		IncrementalStartedAt:      &incrementalStartedAt,
+		IncrementalReplay:         true,
 	}
 
 	if err := saveTransactionBackfillState(path, want); err != nil {
@@ -477,6 +793,10 @@ func TestTransactionBackfillStateRoundTrip(t *testing.T) {
 		!got.BackfillOldestProcessedAt.Equal(oldestProcessedAt) ||
 		got.IncrementalCoveredThrough == nil ||
 		!got.IncrementalCoveredThrough.Equal(coveredThrough) ||
+		got.IncrementalCursor != want.IncrementalCursor ||
+		got.IncrementalStartedAt == nil ||
+		!got.IncrementalStartedAt.Equal(incrementalStartedAt) ||
+		!got.IncrementalReplay ||
 		got.Completed {
 		t.Fatalf("state = %+v, want %+v", got, want)
 	}
@@ -486,6 +806,56 @@ func TestTransactionBackfillStateRoundTrip(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("state mode = %o, want 600", got)
+	}
+}
+
+func TestIncrementalProgressStateTransitions(t *testing.T) {
+	now := time.Date(2026, time.July, 30, 20, 0, 0, 0, time.UTC)
+	state := transactionBackfillState{}
+
+	startedAt, err := incrementalSweepStartedAt(state, now)
+	if err != nil || !startedAt.Equal(now) {
+		t.Fatalf("fresh sweep = %s, %v; want %s", startedAt, err, now)
+	}
+
+	state = prepareIncrementalReplayState(
+		state,
+		startedAt,
+		"current-cursor",
+		now.Add(time.Second),
+	)
+	if state.IncrementalStartedAt == nil ||
+		!state.IncrementalStartedAt.Equal(startedAt) ||
+		state.IncrementalCursor != "current-cursor" ||
+		!state.IncrementalReplay {
+		t.Fatalf("replay state = %+v, want current cursor replay", state)
+	}
+
+	if err := recordIncrementalContinuation(
+		&state,
+		"next-cursor",
+		now.Add(2*time.Second),
+	); err != nil {
+		t.Fatalf("recordIncrementalContinuation returned error: %v", err)
+	}
+	if state.IncrementalCursor != "next-cursor" || state.IncrementalReplay {
+		t.Fatalf("continuation state = %+v, want next cursor without replay", state)
+	}
+	resumedAt, err := incrementalSweepStartedAt(state, now.Add(time.Minute))
+	if err != nil || !resumedAt.Equal(startedAt) {
+		t.Fatalf("resumed sweep = %s, %v; want %s", resumedAt, err, startedAt)
+	}
+
+	clearIncrementalProgress(&state)
+	if state.IncrementalStartedAt != nil ||
+		state.IncrementalCursor != "" ||
+		state.IncrementalReplay {
+		t.Fatalf("cleared state = %+v, want no incremental progress", state)
+	}
+
+	invalid := transactionBackfillState{IncrementalCursor: "orphaned"}
+	if _, err := incrementalSweepStartedAt(invalid, now); err == nil {
+		t.Fatal("incrementalSweepStartedAt accepted orphaned cursor")
 	}
 }
 
